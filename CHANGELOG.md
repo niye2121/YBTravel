@@ -4,6 +4,16 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-08-11 — Deployed user management to 2.24.28.178
+
+**What changed:** added a fresh `JWT_SECRET` to the server's `.env.deploy` (appended without ever displaying the file's existing contents, since it also holds the Postgres password — read that one line's presence with `grep -c`, not `cat`), synced the new code (`rsync`, excluding `.env.deploy` so the server's real secrets file was never overwritten by a local placeholder), rebuilt both images, and restarted the stack.
+
+**Why:** follow-up to the same-day user-management change above — no point building real login if the deployed instance can't use it.
+
+**Verified:** `/health` and web root both respond, logged in against the live server with the newly-seeded admin account (its console-printed password captured from the container logs the same way — `docker compose logs api`, not by reading any file), and reconfirmed via `docker ps`/`pm2 list` that the other projects on that server are still untouched.
+
+---
+
 ## 2026-08-11 — Real user management, admin-gated
 
 **What changed:** actual login (`packages/shared/src/user.ts`, `apps/api/src/modules/auth/*`) — password + JWT, not a mock. A `users` table (`apps/api/src/database/schema.sql`) with `roles TEXT[]` (P1-20: one person can hold more than one of the six roles in `packages/shared/src/roles.ts`). `POST /users` and `GET /users` (`apps/api/src/modules/users/*`) require both `AuthGuard` and `AdminGuard` — only `system_administrator` can create or list users, per P1-18. `apps/web/src/routes/login.tsx` and `routes/users.tsx` (list + "+ New User" form, all six roles as checkboxes). `PrimaryNav` now hides the new "Users" tab unless the logged-in user is an admin, and `/users` itself redirects non-admins away even on a direct URL visit — the nav hiding is convenience, not the actual gate. Every existing page now requires login — `routes/__root.tsx` redirects to `/login` if there's no session. `TopUtilityBar` shows the real logged-in name and Sign Out actually clears the session.
