@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CONSULATE — YB Travel reference implementation (RQ-01 Needs Action Today)</title>
+<!--
+  ============================================================================
+  REFERENCE IMPLEMENTATION — screen RQ-01, the Requests queue list.
+  ----------------------------------------------------------------------------
+  This file is the executable form of the specification. It is authority rank 6.
+  Where it disagrees with tokens.css, 01-CONSULATE-DESIGN-SYSTEM.md or
+  00-DECISIONS.md, THOSE WIN and this file is the defect. Report it.
+
+  Conformance notes, so you can check this file rather than trust it:
+    - Seven booking stages only              (00-DECISIONS.md D9)
+    - Four deadline labels, never abbreviated (D8)
+    - Supplier's stated number is NOT in the grid cell (D8)
+    - Column widths exactly as specified      (D13)
+    - Active queue tab is a 3px --c-gold rule (01 section 4)
+    - Column header and group header carry NO bottom rule
+    - Inputs are 30px, buttons 34px, rows 44px
+    - Zero border-radius anywhere             (01 rule One)
+    - No shadow on this screen at all         (01 rule Four: S2 and S3 only)
+    - No stage colour-coding of any kind      (01 section 5)
+    - Tabular figures on the Fare column only, on this screen (D7)
+  ============================================================================
+-->
+<!-- ----------------------------------------------------------------------------
+     TOKENS ARE INLINED BELOW so this file renders correctly when opened on its
+     own, from any folder, with nothing beside it.
+
+     This block is a VERBATIM COPY of assets/tokens.css. That file remains the
+     single source of truth and wins on any difference. If you change a token,
+     change it there and re-copy it here. Do not edit it only here.
+     ---------------------------------------------------------------------------- -->
+<style>
+/* ============================================================================
+   CONSULATE — design tokens for the YB Travel operations platform
+   ----------------------------------------------------------------------------
+   This file is the SINGLE SOURCE OF TRUTH for colour, type, spacing and shape.
+
+   RULES FOR ANY AGENT OR DEVELOPER TOUCHING THIS CODEBASE:
+   1. Never write a raw hex value in a component. Use a token.
+   2. Never add a token without adding it here first.
+   3. Never introduce a border-radius. There is no radius scale, on purpose.
+   4. Never introduce a shadow except --shadow-window, which belongs to
+      exactly two surfaces: S2 the window and S3 the confirm. Nothing else.
+   5. If a value you need does not exist here, the design has not been made yet.
+      Stop and ask, do not invent one.
+   ============================================================================ */
+
+:root {
+
+  /* ---------- BRAND ------------------------------------------------------ */
+  --c-crown:            #0E4634;  /* the green band, primary buttons, icon tiles */
+  --c-crown-border:     #0A3628;  /* 2px rule under the crown, record window border */
+  --c-crown-hover:      #14604A;  /* object tab hover fill */
+  --c-crown-rule:       #2E6552;  /* hairline rules INSIDE the crown only */
+  --c-crown-ink:        #A8C4B8;  /* secondary text on the crown */
+  --c-gold:             #B07D1A;  /* crest tile, Go button, active queue tab underline */
+  --c-link:             #14604A;  /* in-page hyperlinks (ALWAYS underlined) */
+
+  /* ---------- SURFACES --------------------------------------------------- */
+  --c-canvas:           #E4E7E2;  /* the grey-green page field behind the box */
+  --c-surface:          #FFFFFF;  /* the box, the record window, inputs */
+  --c-band-header:      #DCE2D8;  /* section header strips. A heading is a FILLED BAND. */
+  --c-band-service:    #F1F3EF;  /* column headers, group headers, pagination, row hover */
+
+  /* ---------- BORDERS ----------------------------------------------------
+     Two weights, and the difference between them is the entire grammar:
+       2px --c-border-container  = "this is a container, something is enclosed"
+       1px --c-border-item       = "these are items in a list"
+     Do not invent a third weight.                                            */
+  --c-border-container: #BFC4BC;
+  --c-border-item:      #DDE1DB;
+  --c-border-field:     #EDEFEB;  /* rule under each form field row */
+  --c-border-control:   #A8AEA6;  /* inputs, selects, secondary buttons */
+
+  /* ---------- INK -------------------------------------------------------- */
+  --c-ink:              #1C1F1B;  /* primary text */
+  --c-ink-2:            #5C6159;  /* secondary text, labels, inactive tabs */
+  --c-ink-3:            #8B9089;  /* tertiary: eyebrows, placeholders, counts */
+  --c-ink-invert:       #FFFFFF;
+  --c-ink-on-band:      #23392F;  /* section header strip label ONLY */
+
+  /* ---------- FOCUS -------------------------------------------------------
+     One focus treatment for every interactive element in the product.
+     A 2px outline offset 1px, so it reads as a square ring outside the
+     element's own square border. Never a glow, never a colour change,
+     never a radius.                                                          */
+  --focus-ring:         2px solid #0E4634;
+  --focus-offset:       1px;
+
+  /* ---------- STATUS -----------------------------------------------------
+     Urgency in CONSULATE is a SENTENCE, not a colour block. These colours
+     apply to TEXT ONLY. Never a fill, never a row background, never a chip.  */
+  --c-urgent:           #A32116;  /* deadline inside 4 hours */
+  --c-overdue:          #7A1710;  /* deadline passed */
+  --c-good:             #1E7A3C;  /* paid, ticketed, connected. Text only. */
+
+  /* ---------- SHAPE ------------------------------------------------------ */
+  --radius:             0;        /* every element, no exceptions, forever */
+  --shadow-window:      0 6px 24px rgba(0,0,0,0.35); /* S2 window + S3 confirm ONLY */
+
+  /* ---------- TYPE -------------------------------------------------------
+     One family. No second family. No monospace anywhere in the product.
+     Chosen because it is wide, has a large x-height, is present on every
+     Windows machine in the office, and is the most legible thing available
+     to a 55-year-old at 14px.                                                */
+  --font: Tahoma, Verdana, Geneva, sans-serif;
+
+  --t-wordmark:         15px;  /* 700, uppercase, 1.2px tracking */
+  --t-h1:               22px;  /* 700, page header */
+  --t-window-title:     15px;  /* 700, record window title bar */
+  --t-tab-object:       14px;  /* 600 inactive / 700 active */
+  --t-body:             14px;  /* 400, row primary text, button labels */
+  --t-tab-queue:        13px;  /* 600 */
+  --t-control:          13px;  /* 400 labels, 600 select values */
+  --t-secondary:        13px;  /* 400, row secondary text, count lines */
+  --t-header:           12px;  /* 700 uppercase 0.7px, section header strips */
+  --t-column:           12px;  /* 700 sentence case, column headers */
+  --t-eyebrow:          11px;  /* 700 uppercase 0.7px */
+
+  /* ---------- SPACING ----------------------------------------------------
+     4px grid. Page gutter is 20px and never changes.                        */
+  --gutter:             20px;
+  --pad-box:            14px;  /* inset inside the box */
+  --pad-window:         20px;  /* inset inside the record window body */
+
+  /* ---------- FIXED HEIGHTS ----------------------------------------------
+     These are structural. Changing one changes the silhouette of the product. */
+  --h-crown-row1:       44px;
+  --h-crown-row2:       40px;  /* object tabs. Crown total = 84px */
+  --h-queue-band:       38px;
+  --h-page-header:      64px;
+  --h-section-strip:    32px;
+  --h-control-strip:    44px;
+  --h-column-header:    30px;
+  --h-group-header:     26px;
+  --h-row:              44px;  /* data row. Wide and readable, on purpose. */
+  --h-button:           34px;
+  --h-input:            30px;
+  --h-pagination:       38px;
+  --h-window-title:     40px;
+  --h-window-tabs:      34px;
+}
+
+/* Numerals: tabular figures on any RIGHT-ALIGNED NUMERIC OR CURRENCY column
+   (fares, fees, totals, balances, pagination counts). See 00-DECISIONS.md D7.
+   Left-aligned text, dates, times and deadline sentences stay proportional.
+   There is still no monospace font anywhere in this product. */
+.num, .fare, .fee, .total, .balance, .pagination-count {
+  font-variant-numeric: tabular-nums;
+}
+
+</style>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;border-radius:var(--radius)}
+body{font-family:var(--font);font-size:var(--t-body);color:var(--c-ink);background:var(--c-canvas)}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+a{color:var(--c-link);text-decoration:underline}
+:focus-visible{outline:var(--focus-ring);outline-offset:var(--focus-offset)}
+
+.app{min-height:100vh;display:flex;flex-direction:column}
+
+/* ---------- CROWN ---------- */
+.crown{background:var(--c-crown);border-bottom:2px solid var(--c-crown-border);flex:none}
+.crown-r1{height:var(--h-crown-row1);display:flex;align-items:center;padding:0 var(--gutter)}
+.crest{width:26px;height:26px;background:var(--c-gold);color:var(--c-ink-invert);
+  display:grid;place-items:center;font-size:12px;font-weight:700;flex:none}
+.wordmark{font-size:var(--t-wordmark);font-weight:700;letter-spacing:1.2px;
+  color:var(--c-ink-invert);margin-left:12px}
+.crown-rule{width:1px;height:18px;background:var(--c-crown-rule);margin:0 14px}
+.desk{font-size:var(--t-secondary);font-weight:400;color:var(--c-crown-ink)}
+.spacer{flex:1}
+.search{width:300px;height:var(--h-input);background:var(--c-surface);
+  border:1px solid var(--c-border-control);font-size:var(--t-secondary);
+  color:var(--c-ink-3);display:flex;align-items:center;padding:0 8px}
+.go{width:56px;height:var(--h-input);background:var(--c-gold);color:var(--c-ink-invert);
+  font-size:var(--t-secondary);font-weight:700;display:grid;place-items:center}
+.util{margin-left:20px;font-size:12px;font-weight:400;display:flex;align-items:center;gap:8px}
+.util a{color:var(--c-ink-invert)}
+.util .sep{color:var(--c-crown-rule);text-decoration:none}
+.user{margin-left:16px;font-size:var(--t-tab-queue);font-weight:600;color:var(--c-ink-invert)}
+
+.crown-r2{height:var(--h-crown-row2);display:flex;align-items:stretch;padding:0 var(--gutter)}
+.otab{padding:0 22px;display:grid;place-items:center;font-size:var(--t-tab-object);
+  font-weight:600;color:var(--c-crown-ink)}
+.otab:hover{background:var(--c-crown-hover);color:var(--c-ink-invert)}
+/* The active tab is 42px so it runs 2px past the crown's border and merges into
+   the white band below. This is the signature notch. DERIVED from 01 section 3. */
+.otab.on{background:var(--c-surface);color:var(--c-crown);font-weight:700;
+  height:42px;align-self:flex-start;position:relative;z-index:2}
+
+/* ---------- QUEUE TAB BAND ---------- */
+.qband{height:var(--h-queue-band);background:var(--c-surface);
+  border-bottom:1px solid var(--c-border-container);display:flex;align-items:stretch;
+  padding:0 var(--gutter);flex:none}
+.qtab{padding:0 18px;display:flex;align-items:center;gap:6px;font-size:var(--t-tab-queue);
+  font-weight:600;color:var(--c-ink-2);border-bottom:3px solid transparent}
+.qtab .n{font-weight:400;color:var(--c-ink-3)}
+.qtab .n.urgent{color:var(--c-urgent);font-weight:700}
+.qtab:hover{color:var(--c-ink)}
+.qtab.on{color:var(--c-ink);font-weight:700;border-bottom-color:var(--c-gold)}
+
+/* ---------- PAGE HEADER ---------- */
+.phead{height:var(--h-page-header);background:var(--c-surface);
+  border-bottom:1px solid var(--c-border-container);display:flex;align-items:center;
+  padding:0 var(--gutter);gap:12px;flex:none}
+.ptile{width:32px;height:32px;background:var(--c-crown);color:var(--c-ink-invert);
+  display:grid;place-items:center;font-size:16px;flex:none}
+.eyebrow{font-size:var(--t-eyebrow);font-weight:700;text-transform:uppercase;
+  letter-spacing:0.7px;color:var(--c-ink-3)}
+.h1line{display:flex;align-items:baseline;gap:12px}
+h1{font-size:var(--t-h1);font-weight:700}
+.countline{font-size:var(--t-secondary);font-weight:400;color:var(--c-ink-2)}
+.btn{height:var(--h-button);padding:0 16px;font-size:var(--t-body);font-weight:400;
+  background:var(--c-surface);border:1px solid var(--c-border-control);
+  display:grid;place-items:center}
+.btn.primary{background:var(--c-crown);color:var(--c-ink-invert);
+  border-color:var(--c-crown);font-weight:600}
+
+/* ---------- CANVAS + BOX ---------- */
+.canvas{flex:1;padding:16px var(--gutter)}
+.box{background:var(--c-surface);border:2px solid var(--c-border-container);
+  display:flex;flex-direction:column;min-height:520px}
+.strip{height:var(--h-section-strip);background:var(--c-band-header);
+  display:flex;align-items:center;padding:0 var(--pad-box);
+  font-size:var(--t-header);font-weight:700;text-transform:uppercase;
+  letter-spacing:0.7px;color:var(--c-ink-on-band)}
+.cstrip{height:var(--h-control-strip);display:flex;align-items:center;gap:10px;
+  padding:0 var(--pad-box);border-bottom:1px solid var(--c-border-item)}
+.cstrip label{font-size:var(--t-control);font-weight:400;color:var(--c-ink-2)}
+.sel{height:var(--h-input);border:1px solid var(--c-border-control);
+  background:var(--c-surface);padding:0 9px;font-size:var(--t-control);
+  font-weight:600;color:var(--c-ink);display:flex;align-items:center;gap:8px}
+.cstrip .inline{font-size:12px}
+
+/* Column header and group header carry NO bottom rule. See 05 section 19.14. */
+.chead{height:var(--h-column-header);background:var(--c-band-service);
+  display:flex;align-items:center;padding:0 var(--pad-box);
+  font-size:var(--t-column);font-weight:700;color:var(--c-ink-2)}
+.ghead{height:var(--h-group-header);background:var(--c-band-service);
+  display:flex;align-items:center;padding:0 var(--pad-box);
+  font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;
+  color:var(--c-ink-2)}
+.ghead.urgent{color:var(--c-urgent)}
+
+.rows{flex:1}
+.row{height:var(--h-row);display:flex;align-items:center;padding:0 var(--pad-box);
+  border-bottom:1px solid var(--c-border-item);cursor:pointer}
+.row:hover{background:var(--c-band-service)}
+
+/* Column widths, 00-DECISIONS.md D13. Do not change these. */
+.c-id   {width:88px;flex:none}
+.c-cli  {width:150px;flex:none;font-weight:600}
+.c-trip {width:190px;flex:none}
+.c-stg  {width:130px;flex:none}
+.c-wait {flex:1;min-width:0;color:var(--c-ink-2);font-size:var(--t-secondary);
+         overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.c-fare {width:100px;flex:none;text-align:right;font-variant-numeric:tabular-nums}
+.c-dl   {width:340px;white-space:nowrap;flex:none;text-align:right}
+.c-ag   {width:74px;flex:none;text-align:right;color:var(--c-ink-2);
+         font-size:var(--t-secondary)}
+
+/* Urgency is a SENTENCE. The row never moves and never changes shape. */
+.c-dl.soon{font-size:15px;font-weight:700;color:var(--c-urgent)}
+.c-dl.over{font-size:15px;font-weight:700;color:var(--c-overdue)}
+.stage-over{font-size:var(--t-eyebrow);font-weight:700;text-transform:uppercase;
+  color:var(--c-overdue)}
+
+.pag{height:var(--h-pagination);border-top:2px solid var(--c-border-container);
+  background:var(--c-band-service);display:flex;align-items:center;gap:6px;
+  padding:0 var(--pad-box);font-size:12px;color:var(--c-ink-2)}
+.pg{border:1px solid var(--c-border-control);background:var(--c-surface);
+  padding:3px 9px;font-size:12px;font-variant-numeric:tabular-nums}
+.pg.on{background:var(--c-crown);color:var(--c-ink-invert);
+  border-color:var(--c-crown);font-weight:700}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="crown">
+    <div class="crown-r1">
+      <span class="crest">YB</span>
+      <span class="wordmark">YB TRAVEL</span>
+      <span class="crown-rule"></span>
+      <span class="desk">Brooklyn Desk</span>
+      <span class="spacer"></span>
+      <span class="search">Search name, request number, or PNR</span>
+      <button class="go">Go</button>
+      <span class="util">
+        <a href="#">Setup</a><span class="sep">|</span>
+        <a href="#">Help</a><span class="sep">|</span>
+        <a href="#">Sign Out</a>
+      </span>
+      <span class="user">M. Roth</span>
+    </div>
+    <nav class="crown-r2">
+      <button class="otab on">Requests</button>
+      <button class="otab">Clients</button>
+      <button class="otab">Travellers</button>
+      <button class="otab">Bookings</button>
+      <button class="otab">Tickets</button>
+      <button class="otab">Reports</button>
+      <span class="spacer"></span>
+      <button class="otab">More &#9662;</button>
+    </nav>
+  </header>
+
+  <nav class="qband">
+    <button class="qtab">My Requests <span class="n">31</span></button>
+    <button class="qtab on">Needs Action Today <span class="n urgent">9</span></button>
+    <button class="qtab">New Inquiries <span class="n">12</span></button>
+    <button class="qtab">In Research <span class="n">7</span></button>
+    <button class="qtab">Quoted <span class="n">23</span></button>
+    <button class="qtab">On Hold <span class="n urgent">5</span></button>
+    <button class="qtab">All Requests <span class="n">184</span></button>
+  </nav>
+
+  <div class="phead">
+    <span class="ptile">&#9636;</span>
+    <span>
+      <span class="eyebrow">Requests</span>
+      <span class="h1line">
+        <h1>Needs Action Today</h1>
+        <span class="countline">9 requests, 3 within four hours</span>
+      </span>
+    </span>
+    <span class="spacer"></span>
+    <button class="btn primary">+ New Request</button>
+    <button class="btn">Assign&hellip;</button>
+    <button class="btn">Print</button>
+    <button class="btn">Export &#9662;</button>
+  </div>
+
+  <div class="canvas">
+    <div class="box">
+      <div class="strip">Requests &mdash; Needs Action Today</div>
+
+      <div class="cstrip">
+        <label>View:</label>
+        <span class="sel" style="width:260px">My Open Requests <span class="spacer"></span>&#9662;</span>
+        <a href="#" class="inline">Edit</a><span style="color:var(--c-ink-3)">|</span>
+        <a href="#" class="inline">Create New View</a>
+        <span class="spacer"></span>
+        <label>Sort:</label>
+        <span class="sel">Deadline, ascending &#9662;</span>
+        <label>Show:</label>
+        <span class="sel">50 &#9662;</span>
+      </div>
+
+      <div class="chead">
+        <span class="c-id">Request #</span>
+        <span class="c-cli">Client</span>
+        <span class="c-trip">Trip</span>
+        <span class="c-stg">Stage</span>
+        <span class="c-wait">Waiting on</span>
+        <span class="c-fare">Fare</span>
+        <span class="c-dl">Deadline</span>
+        <span class="c-ag">Agent</span>
+      </div>
+
+      <div class="rows">
+        <div class="ghead urgent">Due today &mdash; 9 requests, 3 within four hours</div>
+
+        <div class="row">
+          <span class="c-id"><a href="#">R-10482</a></span>
+          <span class="c-cli">Kaplan</span>
+          <span class="c-trip">JFK &rarr; TLV &middot; 14 Aug</span>
+          <span class="c-stg">Ready to issue</span>
+          <span class="c-wait">Us, payment confirmed</span>
+          <span class="c-fare">4,187.36</span>
+          <span class="c-dl soon">Ticketing limit &mdash; today 3:20 PM, 3 hours left</span>
+          <span class="c-ag">M. Roth</span>
+        </div>
+
+        <div class="row">
+          <span class="c-id"><a href="#">R-10467</a></span>
+          <span class="c-cli">Mizrahi</span>
+          <span class="c-trip">EWR &rarr; TLV &middot; 3 Oct</span>
+          <span class="c-stg">Payment pending</span>
+          <span class="c-wait">Client, no answer for 2 days</span>
+          <span class="c-fare">9,240.00</span>
+          <span class="c-dl soon">Hold expires &mdash; today 4:15 PM, 4 hours left</span>
+          <span class="c-ag">S. Adler</span>
+        </div>
+
+        <div class="row">
+          <span class="c-id"><a href="#">R-10402</a></span>
+          <span class="c-cli">Weiss</span>
+          <span class="c-trip">JFK &rarr; TLV &middot; 12 Sep</span>
+          <span class="c-stg"><span class="stage-over">Overdue</span></span>
+          <span class="c-wait">Client, passport for Ariel Weiss (12)</span>
+          <span class="c-fare">&mdash;</span>
+          <span class="c-dl over">Follow up &mdash; expired 11:40 AM, 24 minutes ago</span>
+          <span class="c-ag">M. Roth</span>
+        </div>
+
+        <div class="row">
+          <span class="c-id"><a href="#">R-10455</a></span>
+          <span class="c-cli">Friedman</span>
+          <span class="c-trip">TLV &rarr; JFK &middot; 28 Aug</span>
+          <span class="c-stg">Paid</span>
+          <span class="c-wait">Us, issue when ready</span>
+          <span class="c-fare">11,904.00</span>
+          <span class="c-dl">Ticketing limit &mdash; tomorrow 9:00 AM</span>
+          <span class="c-ag">D. Klein</span>
+        </div>
+
+        <div class="row">
+          <span class="c-id"><a href="#">R-10471</a></span>
+          <span class="c-cli">Katz</span>
+          <span class="c-trip">LAX &rarr; TLV &middot; 9 Sep</span>
+          <span class="c-stg">Payment pending</span>
+          <span class="c-wait">Client, invoice sent</span>
+          <span class="c-fare">6,720.00</span>
+          <span class="c-dl">Hold expires &mdash; tomorrow 11:00 AM</span>
+          <span class="c-ag">S. Adler</span>
+        </div>
+
+        <div class="ghead">Due tomorrow &mdash; 6 requests</div>
+
+        <div class="row">
+          <span class="c-id"><a href="#">R-10440</a></span>
+          <span class="c-cli">Schwartz</span>
+          <span class="c-trip">JFK &rarr; TLV &middot; 18 Aug</span>
+          <span class="c-stg">Confirmation sent</span>
+          <span class="c-wait">Us, check-in message</span>
+          <span class="c-fare">2,340.00</span>
+          <span class="c-dl">Check-in opens &mdash; tomorrow 10:00 PM</span>
+          <span class="c-ag">D. Klein</span>
+        </div>
+
+        <div class="row">
+          <span class="c-id"><a href="#">R-10489</a></span>
+          <span class="c-cli">Stern</span>
+          <span class="c-trip">ORD &rarr; TLV &middot; 7 Sep</span>
+          <span class="c-stg">Accepted</span>
+          <span class="c-wait">Client, quote sent today</span>
+          <span class="c-fare">4,905.00</span>
+          <span class="c-dl">Follow up &mdash; tomorrow 9:00 AM</span>
+          <span class="c-ag">M. Roth</span>
+        </div>
+
+        <div class="row">
+          <span class="c-id"><a href="#">R-10388</a></span>
+          <span class="c-cli">Berkowitz</span>
+          <span class="c-trip">EWR &rarr; TLV &middot; 1 Apr</span>
+          <span class="c-stg">Sent to ticketing</span>
+          <span class="c-wait">Ticketing, queued this morning</span>
+          <span class="c-fare">8,155.00</span>
+          <span class="c-dl">Ticketing limit &mdash; tomorrow 2:00 PM</span>
+          <span class="c-ag">S. Adler</span>
+        </div>
+
+        <div class="row">
+          <span class="c-id"><a href="#">R-10361</a></span>
+          <span class="c-cli">Gross</span>
+          <span class="c-trip">TLV &rarr; EWR &middot; 31 Aug</span>
+          <span class="c-stg">Ticket issued</span>
+          <span class="c-wait">Nothing outstanding</span>
+          <span class="c-fare">1,180.00</span>
+          <span class="c-dl">Check-in opens &mdash; 30 Aug 6:00 PM</span>
+          <span class="c-ag">D. Klein</span>
+        </div>
+      </div>
+
+      <div class="pag">
+        <span class="spacer"></span>
+        <button class="pg on">1</button>
+        <button class="pg">2</button>
+        <button class="pg">3</button>
+        <button class="pg">4</button>
+        <button class="pg">Next &#9656;</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

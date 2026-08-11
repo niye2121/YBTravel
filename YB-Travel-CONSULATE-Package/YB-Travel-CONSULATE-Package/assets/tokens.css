@@ -1,0 +1,118 @@
+/* ============================================================================
+   CONSULATE — design tokens for the YB Travel operations platform
+   ----------------------------------------------------------------------------
+   This file is the SINGLE SOURCE OF TRUTH for colour, type, spacing and shape.
+
+   RULES FOR ANY AGENT OR DEVELOPER TOUCHING THIS CODEBASE:
+   1. Never write a raw hex value in a component. Use a token.
+   2. Never add a token without adding it here first.
+   3. Never introduce a border-radius. There is no radius scale, on purpose.
+   4. Never introduce a shadow except --shadow-window, which belongs to
+      exactly two surfaces: S2 the window and S3 the confirm. Nothing else.
+   5. If a value you need does not exist here, the design has not been made yet.
+      Stop and ask, do not invent one.
+   ============================================================================ */
+
+:root {
+
+  /* ---------- BRAND ------------------------------------------------------ */
+  --c-crown:            #0E4634;  /* the green band, primary buttons, icon tiles */
+  --c-crown-border:     #0A3628;  /* 2px rule under the crown, record window border */
+  --c-crown-hover:      #14604A;  /* object tab hover fill */
+  --c-crown-rule:       #2E6552;  /* hairline rules INSIDE the crown only */
+  --c-crown-ink:        #A8C4B8;  /* secondary text on the crown */
+  --c-gold:             #B07D1A;  /* crest tile, Go button, active queue tab underline */
+  --c-link:             #14604A;  /* in-page hyperlinks (ALWAYS underlined) */
+
+  /* ---------- SURFACES --------------------------------------------------- */
+  --c-canvas:           #E4E7E2;  /* the grey-green page field behind the box */
+  --c-surface:          #FFFFFF;  /* the box, the record window, inputs */
+  --c-band-header:      #DCE2D8;  /* section header strips. A heading is a FILLED BAND. */
+  --c-band-service:    #F1F3EF;  /* column headers, group headers, pagination, row hover */
+
+  /* ---------- BORDERS ----------------------------------------------------
+     Two weights, and the difference between them is the entire grammar:
+       2px --c-border-container  = "this is a container, something is enclosed"
+       1px --c-border-item       = "these are items in a list"
+     Do not invent a third weight.                                            */
+  --c-border-container: #BFC4BC;
+  --c-border-item:      #DDE1DB;
+  --c-border-field:     #EDEFEB;  /* rule under each form field row */
+  --c-border-control:   #A8AEA6;  /* inputs, selects, secondary buttons */
+
+  /* ---------- INK -------------------------------------------------------- */
+  --c-ink:              #1C1F1B;  /* primary text */
+  --c-ink-2:            #5C6159;  /* secondary text, labels, inactive tabs */
+  --c-ink-3:            #8B9089;  /* tertiary: eyebrows, placeholders, counts */
+  --c-ink-invert:       #FFFFFF;
+  --c-ink-on-band:      #23392F;  /* section header strip label ONLY */
+
+  /* ---------- FOCUS -------------------------------------------------------
+     One focus treatment for every interactive element in the product.
+     A 2px outline offset 1px, so it reads as a square ring outside the
+     element's own square border. Never a glow, never a colour change,
+     never a radius.                                                          */
+  --focus-ring:         2px solid #0E4634;
+  --focus-offset:       1px;
+
+  /* ---------- STATUS -----------------------------------------------------
+     Urgency in CONSULATE is a SENTENCE, not a colour block. These colours
+     apply to TEXT ONLY. Never a fill, never a row background, never a chip.  */
+  --c-urgent:           #A32116;  /* deadline inside 4 hours */
+  --c-overdue:          #7A1710;  /* deadline passed */
+  --c-good:             #1E7A3C;  /* paid, ticketed, connected. Text only. */
+
+  /* ---------- SHAPE ------------------------------------------------------ */
+  --radius:             0;        /* every element, no exceptions, forever */
+  --shadow-window:      0 6px 24px rgba(0,0,0,0.35); /* S2 window + S3 confirm ONLY */
+
+  /* ---------- TYPE -------------------------------------------------------
+     One family. No second family. No monospace anywhere in the product.
+     Chosen because it is wide, has a large x-height, is present on every
+     Windows machine in the office, and is the most legible thing available
+     to a 55-year-old at 14px.                                                */
+  --font: Tahoma, Verdana, Geneva, sans-serif;
+
+  --t-wordmark:         15px;  /* 700, uppercase, 1.2px tracking */
+  --t-h1:               22px;  /* 700, page header */
+  --t-window-title:     15px;  /* 700, record window title bar */
+  --t-tab-object:       14px;  /* 600 inactive / 700 active */
+  --t-body:             14px;  /* 400, row primary text, button labels */
+  --t-tab-queue:        13px;  /* 600 */
+  --t-control:          13px;  /* 400 labels, 600 select values */
+  --t-secondary:        13px;  /* 400, row secondary text, count lines */
+  --t-header:           12px;  /* 700 uppercase 0.7px, section header strips */
+  --t-column:           12px;  /* 700 sentence case, column headers */
+  --t-eyebrow:          11px;  /* 700 uppercase 0.7px */
+
+  /* ---------- SPACING ----------------------------------------------------
+     4px grid. Page gutter is 20px and never changes.                        */
+  --gutter:             20px;
+  --pad-box:            14px;  /* inset inside the box */
+  --pad-window:         20px;  /* inset inside the record window body */
+
+  /* ---------- FIXED HEIGHTS ----------------------------------------------
+     These are structural. Changing one changes the silhouette of the product. */
+  --h-crown-row1:       44px;
+  --h-crown-row2:       40px;  /* object tabs. Crown total = 84px */
+  --h-queue-band:       38px;
+  --h-page-header:      64px;
+  --h-section-strip:    32px;
+  --h-control-strip:    44px;
+  --h-column-header:    30px;
+  --h-group-header:     26px;
+  --h-row:              44px;  /* data row. Wide and readable, on purpose. */
+  --h-button:           34px;
+  --h-input:            30px;
+  --h-pagination:       38px;
+  --h-window-title:     40px;
+  --h-window-tabs:      34px;
+}
+
+/* Numerals: tabular figures on any RIGHT-ALIGNED NUMERIC OR CURRENCY column
+   (fares, fees, totals, balances, pagination counts). See 00-DECISIONS.md D7.
+   Left-aligned text, dates, times and deadline sentences stay proportional.
+   There is still no monospace font anywhere in this product. */
+.num, .fare, .fee, .total, .balance, .pagination-count {
+  font-variant-numeric: tabular-nums;
+}
