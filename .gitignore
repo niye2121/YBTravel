@@ -9,6 +9,9 @@ build/
 .vite/
 *.tsbuildinfo
 
+# Generated
+apps/web/src/routeTree.gen.ts
+
 # Environment and secrets — never commit these
 .env
 .env.*
@@ -48,3 +51,11 @@ Thumbs.db
 *.sqlite3
 /uploads/
 /tmp/
+
+# WhatsApp session credentials — never commit, this is a live login session
+.baileys-auth/
+
+# Personal, non-shared instructions and logs — local to this user only
+CLAUDE.local.md
+SESSION-LOG.local.md
+SESSION-LOG.local.xlsx

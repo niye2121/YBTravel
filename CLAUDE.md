@@ -2,6 +2,8 @@
 
 Context for Claude Code. Read this before doing anything; it carries decisions already made so they don't get re-litigated or accidentally reversed.
 
+A gitignored `CLAUDE.local.md` may also exist alongside this file, holding personal instructions for whoever's working locally that aren't shared with the team. Check for it if present — it's never committed, so don't expect it to exist on a fresh clone.
+
 ## What this is
 
 An internal travel operations platform for **YB Travel**, a Brooklyn-based agency. It owns the whole client lifecycle: WhatsApp inquiry → onboarding → traveller profiles → flight research → Sabre-verified quoting → reservation holds → payment → ticket issuance → active-trip servicing → exchanges and refunds → accounting reconciliation.
@@ -12,7 +14,11 @@ It is a combined front-office, mid-office and back-office system on one shared d
 
 ## Status
 
-Nothing is built yet. What exists: an approved technology stack, an approved design system, two working UI prototypes, and 105 catalogued deliverables. Next step is the platform foundation (see Sequencing).
+Platform foundation scaffolded: npm-workspaces monorepo (`apps/web`, `apps/api`, `packages/shared`), Tailwind v4 theme tokens matching the design system, TanStack Router, the Home and Requests screens ported from the prototypes onto those tokens, and a NestJS module skeleton (`clients`, `requests`, `auth`) with a working Postgres-backed health check. See `README.md` for how to run it.
+
+A live WhatsApp inbox now exists (`apps/api/src/modules/messaging/`, `apps/web/src/routes/inbox.tsx`) — the first real domain tables (`whatsapp_connections`, `conversations`, `messages`, still raw SQL, no ORM), the first live external integration (Baileys, on a separate/test number per the resolved decision in `docs/05-open-decisions.md` #9), and the first use of the WebSocket gateway and TanStack Query. **These new endpoints have no auth** — Auth0 isn't wired anywhere in the app yet, so this matches the existing pattern, but messages can carry passport/payment data, and this must close before anything near production.
+
+No other domain logic, ORM, real Auth0 wiring, or background jobs yet — those are still next, and several are blocked on the open decisions below. Requires Node 20.19+ (TanStack Router and Tailwind's engine both need it); confirm the dev machine's default Node before assuming `npm install` will succeed.
 
 ## Stack — approved, do not change without discussion
 
@@ -100,6 +106,10 @@ Phase 3 starts only once Sabre access is commercially confirmed.
 
 `docs/05-open-decisions.md`. The ones most likely to cause rework if guessed: QuickBooks Online vs Desktop, ARC accreditation status, and which Yaalago capabilities must be reproduced.
 
+## Change log
+
+Every implemented change gets an entry in `CHANGELOG.md` — what changed, and why. Plan first (as always), then implement, then log the entry from that plan's reasoning rather than reconstructing it afterward. This is a standing instruction, not a one-off.
+
 ## Working notes for Claude Code
 
 - Don't scaffold with a component library that carries visual opinions (MUI, Ant). shadcn/ui is fine because components are copied in as editable source and restyled to YB tokens.
@@ -107,3 +117,4 @@ Phase 3 starts only once Sabre access is commercially confirmed.
 - Don't enable PostgreSQL row-level security yet — deferred until the Phase 8 client portal, because it complicates pooling, workers, reporting and migrations.
 - Don't treat Auth0 RBAC as the authorization model. It's coarse role claims only.
 - When a decision in `05-open-decisions.md` is answered, update that file in the same commit as the code that depends on it.
+- After implementing any change, append an entry to `CHANGELOG.md` (what changed, why) in the same commit. See "Change log" above.

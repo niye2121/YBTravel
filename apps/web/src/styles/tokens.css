@@ -1,0 +1,65 @@
+@import url("https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&display=swap");
+@import "tailwindcss";
+
+/*
+ * YB Travel design tokens — extracted from design/requests-queue.approved.html,
+ * documented in docs/02-design-system.md. Do not fall back to Tailwind's
+ * default gray-* scale anywhere in this app; these greys are warm, not cool.
+ */
+@theme {
+  --font-sans: "Lato", -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* Brand and chrome */
+  --color-yb-green: #0f4430;
+  --color-yb-green-light: #12503a;
+  --color-yb-green-dark: #0d3f2c;
+  --color-yb-green-darker: #0a3324;
+  --color-yb-green-hover: #15583d;
+  --color-yb-gold: #d9a326;
+  --color-yb-gold-border: #b8871a;
+  --color-yb-gold-hover: #e5b13a;
+  --color-yb-gold-text: #3b2a05;
+  --color-yb-gold-count: #a8761b;
+
+  /* Text */
+  --color-yb-ink: #22221f;
+  --color-yb-ink2: #33332e;
+  --color-yb-muted: #4b4b44;
+  --color-yb-muted2: #5c5c54;
+  --color-yb-muted3: #6f6f66;
+  --color-yb-muted4: #7d7d74;
+  --color-yb-muted5: #8a8a80;
+  --color-yb-nav-text: #e4ece8;
+  --color-yb-desk-text: #b9cec3;
+  --color-yb-nav-more: #dfeae4;
+
+  /* Surfaces and lines */
+  --color-yb-panel-head: #e9eae1;
+  --color-yb-panel-head-text: #3f4a42;
+  --color-yb-toolbar: #fbfbf7;
+  --color-yb-table-head: #f4f4ed;
+  --color-yb-row-hover: #f6f8f3;
+  --color-yb-hover-btn: #f2f2ec;
+  --color-yb-line: #cfcfc4;
+  --color-yb-line-btn: #b6b6ac;
+  --color-yb-line-row: #e6e6dc;
+  --color-yb-line-soft: #ddddd3;
+  --color-yb-line-soft2: #dcdcd2;
+  --color-yb-line-head: #d6d6cd;
+
+  /* Status */
+  --color-yb-red: #b3261e;
+  --color-yb-red-group: #9c2b1c;
+  --color-yb-amber: #8a6410;
+
+  /* Geometry — 2px radius everywhere except the logo tile (3px) and the
+     active nav tab (3px 3px 0 0, applied directly where used). */
+  --radius-yb: 2px;
+  --radius-yb-tile: 3px;
+}
+
+body {
+  background: #f7f7f2;
+  font-family: var(--font-sans);
+  color: var(--color-yb-ink);
+}

@@ -14,7 +14,7 @@ Nothing here blocks starting the platform foundation. Each item blocks the integ
 | 6 | When is the per-passenger booking fee collected — before research, after quote acceptance, or before issuance — and is it refundable if the client declines? | Phase 2 build |
 | 7 | Who may approve an exception to the payment-before-issuance rule, and which clients have approved credit arrangements? | Phase 2 approval logic |
 | 8 | Which Sabre operations must **always** require supervisor approval? | Authorization policy |
-| 9 | Is Baileys accepted as a time-boxed risk, on which number, with what migration path? See risk note below. | Messaging work |
+| 9 | ~~Is Baileys accepted as a time-boxed risk, on which number, with what migration path?~~ **Resolved 2026-08-10 — see "Resolved decisions" below.** | Messaging work |
 | 10 | Which flight-data source for schedule changes, terminal, baggage and actual times — or start with Sabre queues? Commercial quotations required. | Phase 4 automation |
 | 11 | Access to the SOPs for declined offers, hotel booking, and temporary return-segment procedures, which were unavailable during the blueprint review. | Phases 5–6 |
 
@@ -37,6 +37,10 @@ Nothing here blocks starting the platform foundation. Each item blocks the integ
 **Virtual card payments** for hotel and supplier settlement are not covered — relevant to Phase 6.
 
 **No environment or release strategy is described.**
+
+## Resolved decisions
+
+**#9 — Baileys risk acceptance (2026-08-10).** Accepted, with the safeguards in the risk note below applied: a **separate/test number** is paired, not the live business number, and incoming messages surface on a **dedicated Inbox screen** (`apps/web/src/routes/inbox.tsx`) rather than the manual-paste flow. Migration path to the official Cloud API remains the plan once the business number is ready to move — no date set. See `CHANGELOG.md` (2026-08-10) for what was built.
 
 ## Baileys risk note
 

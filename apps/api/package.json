@@ -1,0 +1,37 @@
+{
+  "name": "@yb-travel/api",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "nest start --watch",
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "node scripts/migrate.js"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.4.15",
+    "@nestjs/core": "^10.4.15",
+    "@nestjs/platform-express": "^10.4.15",
+    "@nestjs/platform-socket.io": "^10.4.15",
+    "@nestjs/websockets": "^10.4.15",
+    "@whiskeysockets/baileys": "^6.7.16",
+    "@yb-travel/shared": "*",
+    "dotenv": "^16.4.7",
+    "pg": "^8.13.1",
+    "pino": "^9.6.0",
+    "qrcode-terminal": "^0.12.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "socket.io": "^4.8.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^10.4.9",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.5",
+    "@types/pg": "^8.11.10",
+    "@types/qrcode-terminal": "^0.12.2",
+    "typescript": "^5.7.3"
+  }
+}
