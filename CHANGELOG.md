@@ -4,6 +4,22 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-08-11 — Deployed to the shared preview server (2.24.28.178)
+
+**What changed:** added `apps/api/Dockerfile`, `apps/web/Dockerfile`, `docker-compose.deploy.yml`, `.dockerignore`. Built and started the stack on the server at `/srv/yb-travel`: Postgres, the NestJS API (port 4001), and the built web app served via `vite preview` (port 4173), all on a dedicated `yb_travel_net` Docker network.
+
+**Why:** user gave SSH access to a server that already runs several other projects (two Odoo instances via Docker, two Node apps via PM2, nginx serving two other sites) and explicitly asked that nothing else on it be touched. Surveyed the server first (read-only — `docker ps`, `pm2 list`, `ss -tlnp`, `crontab -l`, etc.) before installing anything, to see what ports/services already existed. Chose full Docker isolation — own network, own Postgres container, own named volumes, fresh unused ports (4001, 4173) — specifically so this can be torn down with `docker compose down` in `/srv/yb-travel` without any risk to the other projects. Confirmed via `docker ps`/`pm2 list` after deploy that all pre-existing containers and PM2 processes were still running unaffected.
+
+**Access:** chosen as direct IP:port (`http://2.24.28.178:4173`) rather than an nginx-proxied subdomain, since there's no domain pointed at this server yet — plain HTTP, not meant as a production URL, just a shared preview link. Postgres has no host port mapping (internal to the Docker network only, same convention already used by the other two Postgres containers on this box). Credentials generated fresh (`openssl rand -hex 20`) and stored only in `/srv/yb-travel/.env.deploy` on the server, which is not part of the git-tracked repo.
+
+**Fixed along the way:** first build attempt failed — `apps/web/tsconfig.json` extends the root `tsconfig.base.json`, which the Dockerfiles weren't copying into the build stage (only `package.json`/`package-lock.json` were). Added it to both Dockerfiles' `COPY` list.
+
+**Not done, worth flagging:** no auth on these endpoints (matches the rest of the app so far — Auth0 isn't wired up anywhere yet), no HTTPS/TLS, no reverse-proxy in front of it. Fine for an internal preview link; not something to leave exposed like this if this ever needs to be client-facing.
+
+**Verified:** `curl http://2.24.28.178:4001/health` → `{"status":"ok","db":"connected"}`. `curl http://2.24.28.178:4173/` → HTTP 200 with `<title>YB Travel</title>`. `docker ps` and `pm2 list` on the server confirmed after deploy that all six pre-existing containers and both PM2 apps were still up, untouched.
+
+---
+
 ## 2026-08-11 — Hide Home from nav, keep the code; keep the live WhatsApp Inbox
 
 **What changed:** `apps/web/src/lib/navTabs.ts` — removed `{ label: "Home", to: "/" }` from `NAV_TABS`. `routes/index.tsx` and `data/homeData.ts` are untouched, so the page still exists, it's just unlinked from the nav.
