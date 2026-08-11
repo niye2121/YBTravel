@@ -1,12 +1,15 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import type { NavTab } from "../../lib/navTabs";
+import { useAuth } from "../../lib/AuthContext";
 
 export function PrimaryNav({ tabs }: { tabs: NavTab[] }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { isAdmin } = useAuth();
+  const visibleTabs = tabs.filter((tab) => !tab.adminOnly || isAdmin);
 
   return (
     <div className="flex h-[44px] items-end gap-[2px] bg-yb-green-dark px-[22px]">
-      {tabs.map((tab) => {
+      {visibleTabs.map((tab) => {
         if (tab.to) {
           const active = tab.to === pathname;
           return (

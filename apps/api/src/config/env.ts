@@ -5,6 +5,7 @@ const envSchema = z.object({
     .string()
     .regex(/^postgres(?:ql)?:\/\//, "DATABASE_URL must be a postgres connection string"),
   PORT: z.coerce.number().int().positive().default(3001),
+  JWT_SECRET: z.string().min(16, "JWT_SECRET must be at least 16 characters"),
 });
 
 export type Env = z.infer<typeof envSchema>;

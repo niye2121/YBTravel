@@ -4,6 +4,22 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-08-11 — Real user management, admin-gated
+
+**What changed:** actual login (`packages/shared/src/user.ts`, `apps/api/src/modules/auth/*`) — password + JWT, not a mock. A `users` table (`apps/api/src/database/schema.sql`) with `roles TEXT[]` (P1-20: one person can hold more than one of the six roles in `packages/shared/src/roles.ts`). `POST /users` and `GET /users` (`apps/api/src/modules/users/*`) require both `AuthGuard` and `AdminGuard` — only `system_administrator` can create or list users, per P1-18. `apps/web/src/routes/login.tsx` and `routes/users.tsx` (list + "+ New User" form, all six roles as checkboxes). `PrimaryNav` now hides the new "Users" tab unless the logged-in user is an admin, and `/users` itself redirects non-admins away even on a direct URL visit — the nav hiding is convenience, not the actual gate. Every existing page now requires login — `routes/__root.tsx` redirects to `/login` if there's no session. `TopUtilityBar` shows the real logged-in name and Sign Out actually clears the session.
+
+**Why:** user asked for user management with an admin-only menu. Real auth0 wiring is still pending client approval (unchanged from the original decision), so this is a self-contained email/password system as the bridge until then — same reasoning already used for keeping the Baileys WhatsApp integration over CONSULATE's paste-only model: build the real thing now rather than a mock that would need throwing away later.
+
+**The chicken-and-egg problem:** creating a user requires being logged in as an admin, but the users table starts empty. Fixed in `apps/api/scripts/migrate.js` — on a fresh (empty) users table, it seeds one `system_administrator` account with a random password, printed once to the console. Safe to run on every deploy since it only fires when the table is empty.
+
+**A real bug caught during verification, not just typecheck:** `packages/shared` is consumed as raw TypeScript source with no build step — safe for `import type` (erased at compile time) but not for actual values. `auth.controller.ts` and `users.controller.ts` originally imported `loginSchema`/`createUserSchema` as real zod objects from shared, which crashed `nest start --watch` locally with `ERR_MODULE_NOT_FOUND` on shared's own extensionless internal imports — and would have crashed identically at runtime in the deployed Docker image (`node dist/main.js` can't execute raw `.ts`). Fixed by defining those two schemas locally in the API instead, with a comment explaining why, and keeping only type-only imports from `@yb-travel/shared` anywhere in `apps/api`.
+
+**Verified, not just typechecked:** ran the full stack locally (Postgres via `docker compose up -d postgres`, API via `npm run dev --workspace apps/api`, web via the preview tool). Migrated and seeded the admin. Logged in via curl and confirmed a non-admin gets 403 from `/users`. Then in the actual browser: logged in as the seeded admin, saw the Users tab, created a user through the real form (not the API directly), saw it appear in the list. Signed out, logged in as that new non-admin user, confirmed the Users tab is gone from nav, and confirmed a direct `/users` URL visit bounces back to `/`.
+
+**Still open:** no password reset flow, no self-service — an admin has to hand out the temporary password directly. `JWT_SECRET` still needs to be added to the server's `.env.deploy` before this reaches 2.24.28.178 (next step, not yet done as of this entry).
+
+---
+
 ## 2026-08-11 — Wrote docs/DEPLOYMENT.md
 
 **What changed:** added `docs/DEPLOYMENT.md`, a step-by-step runbook for deploying to a shared server — survey first, isolate (own directory/network/database/ports), write the Dockerfiles + compose file, ship secrets straight to the server (never through the repo), build, verify both that the app works *and* that nothing else on the server broke, then log it.

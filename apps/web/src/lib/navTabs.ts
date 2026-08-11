@@ -8,7 +8,11 @@ export type NavTab = {
     | "/travellers"
     | "/bookings"
     | "/tickets"
-    | "/reports";
+    | "/reports"
+    | "/users";
+  // Hidden from the nav (in PrimaryNav) for anyone without the
+  // system_administrator role. See docs/03-deliverables.md P1-18.
+  adminOnly?: boolean;
 };
 
 /**
@@ -30,4 +34,5 @@ export const NAV_TABS: NavTab[] = [
   { label: "Bookings", to: "/bookings" },
   { label: "Tickets", to: "/tickets" },
   { label: "Reports", to: "/reports" },
+  { label: "Users", to: "/users", adminOnly: true },
 ];

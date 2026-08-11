@@ -29,3 +29,17 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS messages_conversation_id_created_at_idx
   ON messages (conversation_id, created_at);
+
+-- Staff accounts — P1-13..P1-20 in docs/03-deliverables.md. roles is an
+-- array, not a single value, because P1-20 explicitly allows one person to
+-- hold more than one role. Valid role strings are enforced at the app
+-- boundary (packages/shared's staffRoleSchema), not with a DB CHECK, since
+-- checking every array element in SQL is more trouble than it's worth here.
+CREATE TABLE IF NOT EXISTS users (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  roles TEXT[] NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

@@ -1,12 +1,43 @@
+import type { CreateUserInput, LoginResponse, User } from "@yb-travel/shared";
+import { clearSession, getToken } from "./session";
+
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
 
+/**
+ * Extracts a readable message from the API's error response shape —
+ * either a plain `message` string (most NestJS exceptions) or the
+ * zod `fieldErrors` object our own validation errors send — so forms can
+ * show something better than "Request failed: 400".
+ */
+async function extractErrorMessage(res: Response): Promise<string> {
+  try {
+    const body = await res.json();
+    if (typeof body.message === "string") return body.message;
+    if (body.message && typeof body.message === "object") {
+      const first = Object.values(body.message).flat()[0];
+      if (typeof first === "string") return first;
+    }
+  } catch {
+    // fall through to the generic message below
+  }
+  return `Request failed with status ${res.status}`;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getToken();
   const res = await fetch(`${API_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...init?.headers,
+    },
   });
   if (!res.ok) {
-    throw new Error(`Request to ${path} failed: ${res.status}`);
+    // A stale/expired token isn't recoverable — clear it so the next
+    // navigation's route guard sends the user back to /login.
+    if (res.status === 401) clearSession();
+    throw new Error(await extractErrorMessage(res));
   }
   return res.json() as Promise<T>;
 }
@@ -34,6 +65,20 @@ export type MessageRecord = {
   body: string;
   senderJid: string;
   createdAt: string;
+};
+
+export const authApi = {
+  login: (email: string, password: string) =>
+    request<LoginResponse>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+};
+
+export const usersApi = {
+  list: () => request<User[]>("/users"),
+  create: (input: CreateUserInput) =>
+    request<User>("/users", { method: "POST", body: JSON.stringify(input) }),
 };
 
 export const messagingApi = {

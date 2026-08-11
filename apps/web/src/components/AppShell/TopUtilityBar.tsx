@@ -1,9 +1,22 @@
+import { useNavigate } from "@tanstack/react-router";
+import type { MouseEvent } from "react";
+import { useAuth } from "../../lib/AuthContext";
+
 type TopUtilityBarProps = {
   query?: string;
   onQueryChange?: (value: string) => void;
 };
 
 export function TopUtilityBar({ query, onQueryChange }: TopUtilityBarProps) {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
+  function handleSignOut(e: MouseEvent) {
+    e.preventDefault();
+    logout();
+    void navigate({ to: "/login" });
+  }
+
   return (
     <div className="flex h-[60px] items-center gap-[18px] bg-linear-to-b from-yb-green-light to-yb-green-dark px-[22px]">
       <div className="flex items-center gap-[10px]">
@@ -48,12 +61,12 @@ export function TopUtilityBar({ query, onQueryChange }: TopUtilityBarProps) {
         </a>
         <a
           href="#"
-          onClick={(e) => e.preventDefault()}
+          onClick={handleSignOut}
           className="text-[13px] text-yb-nav-text underline hover:text-white"
         >
           Sign Out
         </a>
-        <div className="text-[14px] font-bold text-white">M. Roth</div>
+        <div className="text-[14px] font-bold text-white">{user?.name ?? ""}</div>
       </div>
     </div>
   );
