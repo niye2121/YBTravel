@@ -4,6 +4,16 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-08-11 — Hide Home from nav, keep the code; keep the live WhatsApp Inbox
+
+**What changed:** `apps/web/src/lib/navTabs.ts` — removed `{ label: "Home", to: "/" }` from `NAV_TABS`. `routes/index.tsx` and `data/homeData.ts` are untouched, so the page still exists, it's just unlinked from the nav.
+
+**Why:** decisions made 2026-08-11 while comparing this branch against Joe's CONSULATE spec (see `docs/CONSULATE-AUDIT.md` on `main`). CONSULATE has no Home tab — Requests' default queue (`Needs Action Today`) already does that job, so the user agreed to drop it from the nav, but wanted the code kept rather than deleted in case it's wanted later. Separately, the user decided to **keep the live Baileys WhatsApp Inbox** rather than rebuild it as CONSULATE's RQ-11 paste-only intake — reasoning that RQ-11's paste-based design is the fallback for a business with no live WhatsApp integration, not a rejection of having one. No code change was needed for that second decision (already built this way); it's recorded here and in the audit doc as a deliberate, explicit override of a design language the client called "locked."
+
+**Verified:** `npm run typecheck --workspace apps/web` clean. Visual verification in the browser wasn't possible this session — the preview tool starts the dev server with the system Node (18.17.1), and Vite/TanStack Router need 20.19+; this is a known environment limitation from earlier in the project, not something introduced by this change. The edit itself is a single array-entry removal with no logic change, so typecheck + a manual read of the diff stood in for a live check.
+
+---
+
 ## 2026-08-10 — Requests page was missing Home from its own nav
 
 **What changed:** `apps/web/src/routes/requests.tsx` — removed `NAV_TABS.filter((t) => t.label !== "Home")`, now passes `NAV_TABS` straight through like every other page.
