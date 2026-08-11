@@ -55,7 +55,11 @@ Thumbs.db
 # WhatsApp session credentials — never commit, this is a live login session
 .baileys-auth/
 
-# Personal, non-shared instructions and logs — local to this user only
+# Personal, non-shared instructions and logs — local to this user only.
+# Glob catches any future *.local.md/.xlsx too (e.g. DEPLOYMENT.local.md),
+# not just these two specific files.
+*.local.md
+*.local.xlsx
 CLAUDE.local.md
 SESSION-LOG.local.md
 SESSION-LOG.local.xlsx
