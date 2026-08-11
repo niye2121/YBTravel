@@ -1,0 +1,67 @@
+# Server preview stack — separate from docker-compose.yml (that one is
+# local-dev-only, Postgres alone). This brings up the whole app: Postgres,
+# the NestJS API, and the built web frontend, all on their own private
+# Docker network (yb_travel_net) so nothing here can collide with other
+# projects already running on the same host. Only the API and web ports are
+# published to the host; Postgres stays internal-only, same as the other
+# Postgres containers already on this server.
+#
+# Secrets (POSTGRES_PASSWORD, DATABASE_URL) come from .env.deploy, which is
+# created directly on the server and never committed to git.
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    env_file: .env.deploy
+    environment:
+      POSTGRES_USER: yb
+      POSTGRES_DB: yb_travel
+    volumes:
+      - yb_travel_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yb -d yb_travel"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - yb_travel_net
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file: .env.deploy
+    environment:
+      PORT: 3001
+    ports:
+      - "4001:3001"
+    volumes:
+      # Persists the WhatsApp pairing across container restarts — without
+      # this, every redeploy would force re-scanning the QR code.
+      - yb_travel_baileys_auth:/repo/apps/api/.baileys-auth
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - yb_travel_net
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: http://2.24.28.178:4001
+    restart: unless-stopped
+    ports:
+      - "4173:4173"
+    networks:
+      - yb_travel_net
+
+networks:
+  yb_travel_net:
+    name: yb_travel_net
+
+volumes:
+  yb_travel_postgres_data:
+  yb_travel_baileys_auth:
