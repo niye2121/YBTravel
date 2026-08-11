@@ -4,6 +4,14 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-08-11 — Wrote docs/DEPLOYMENT.md
+
+**What changed:** added `docs/DEPLOYMENT.md`, a step-by-step runbook for deploying to a shared server — survey first, isolate (own directory/network/database/ports), write the Dockerfiles + compose file, ship secrets straight to the server (never through the repo), build, verify both that the app works *and* that nothing else on the server broke, then log it.
+
+**Why:** user liked how the deploy to 2.24.28.178 was handled and asked for the steps written down to reuse next time, before he moves on to further tasks. Written as a general runbook (placeholders for server IP/ports) rather than a one-off record of that specific deploy, so it's reusable for a future redeploy here or a setup on a different server.
+
+---
+
 ## 2026-08-11 — Deployed to the shared preview server (2.24.28.178)
 
 **What changed:** added `apps/api/Dockerfile`, `apps/web/Dockerfile`, `docker-compose.deploy.yml`, `.dockerignore`. Built and started the stack on the server at `/srv/yb-travel`: Postgres, the NestJS API (port 4001), and the built web app served via `vite preview` (port 4173), all on a dedicated `yb_travel_net` Docker network.
