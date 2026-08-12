@@ -4,6 +4,16 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-08-12 — Auto-recover the WhatsApp connection after a real logout
+
+**What changed:** `apps/api/src/modules/messaging/baileys.connector.ts` — on a genuine logout (WhatsApp's `DisconnectReason.loggedOut`), the connector now clears the stale `.baileys-auth` session files and immediately reconnects, which makes Baileys generate a fresh QR code. Previously it just logged a warning and stopped — the Inbox screen would sit on "disconnected" with no way to recover short of someone SSHing into the server, deleting files by hand, and restarting the container.
+
+**Why:** investigated a report that the WhatsApp test number kept disconnecting. Server logs showed a single, real event — WhatsApp sent a `device_removed` conflict about 43 seconds after connecting — not a bug in our code, but WhatsApp's own multi-device system reporting the linked session was removed (most likely someone unlinked it from the phone's Linked Devices screen, or WhatsApp's own automation detection ended it — a known, already-documented risk of using Baileys, see `docs/05-open-decisions.md` #9). While diagnosing that, found the connector had no self-recovery path for this case at all, which is the part actually worth fixing in code.
+
+**Verified:** typecheck clean. Deployed to the server; manually cleared the already-dead session there too (the code fix only changes behavior for *future* disconnects, not the one that already happened before this deploy) and confirmed a fresh QR was generated in the logs.
+
+---
+
 ## 2026-08-12 — Redeployed Clients/Travellers + Setup menu to 2.24.28.178
 
 **What changed:** synced the current code to `/srv/yb-travel` on the server, rebuilt both Docker images, restarted the stack. No new secrets needed this time — `.env.deploy` already had everything from the Users deploy.

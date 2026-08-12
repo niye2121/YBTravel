@@ -1,3 +1,4 @@
+import * as fs from "fs/promises";
 import * as path from "path";
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import type { WASocket } from "@whiskeysockets/baileys";
@@ -100,7 +101,18 @@ export class BaileysConnector implements MessagingChannel, OnModuleInit {
             this.logger.error(`Baileys reconnect failed: ${(err as Error).message}`),
           );
         } else {
-          this.logger.warn("WhatsApp logged out — delete .baileys-auth and re-scan to reconnect.");
+          // A real logout (device removed on the phone, or WhatsApp itself
+          // ended the session) — the old credentials are dead and resuming
+          // with them would just fail again. Clear them and reconnect so
+          // Baileys generates a brand-new QR instead of leaving the Inbox
+          // screen stuck on "disconnected" with no way to recover without
+          // someone manually clearing files on the server.
+          this.logger.warn("WhatsApp logged out — clearing stale session and requesting a new QR.");
+          fs.rm(authDir, { recursive: true, force: true })
+            .then(() => this.connect())
+            .catch((err) =>
+              this.logger.error(`Failed to reset session after logout: ${(err as Error).message}`),
+            );
         }
       }
     });
