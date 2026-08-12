@@ -4,6 +4,14 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-08-12 — Redeployed Clients/Travellers + Setup menu to 2.24.28.178
+
+**What changed:** synced the current code to `/srv/yb-travel` on the server, rebuilt both Docker images, restarted the stack. No new secrets needed this time — `.env.deploy` already had everything from the Users deploy.
+
+**Verified:** `/health` returns ok, `/clients` correctly returns 401 without a token (auth guard active), web root returns 200. Confirmed `clients`, `travellers`, and `traveller_accounts` all exist in the server's Postgres via `\dt`. Reconfirmed via `docker ps`/`pm2 list` that the other projects on that shared server are untouched.
+
+---
+
 ## 2026-08-12 — Moved Users under a Setup dropdown
 
 **What changed:** "Users" no longer sits as its own top-level nav tab next to Reports. It now lives inside a new "Setup" dropdown in the top utility bar (`apps/web/src/components/AppShell/SetupMenu.tsx`), positioned before Help and Sign Out. "Setup" only appears at all for `system_administrator` users — for everyone else it's not there, since there's nothing behind it for them yet. Removed the now-unused `adminOnly` field from `NavTab` and the filtering logic in `PrimaryNav.tsx`, since Users was the only thing using it.
