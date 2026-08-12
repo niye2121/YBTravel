@@ -8,11 +8,7 @@ export type NavTab = {
     | "/travellers"
     | "/bookings"
     | "/tickets"
-    | "/reports"
-    | "/users";
-  // Hidden from the nav (in PrimaryNav) for anyone without the
-  // system_administrator role. See docs/03-deliverables.md P1-18.
-  adminOnly?: boolean;
+    | "/reports";
 };
 
 /**
@@ -25,6 +21,10 @@ export type NavTab = {
  * and Requests (no real backend for those entities yet). Inbox sits before
  * Requests: it's chronologically upstream of the request queue —
  * a message becomes a request, not the reverse.
+ *
+ * Users lives under the Setup dropdown (components/AppShell/SetupMenu.tsx)
+ * in the top utility bar, not here — per Joe's review feedback, admin
+ * screens shouldn't sit as their own top-level tab next to Reports.
  */
 export const NAV_TABS: NavTab[] = [
   { label: "Inbox", to: "/inbox" },
@@ -34,5 +34,4 @@ export const NAV_TABS: NavTab[] = [
   { label: "Bookings", to: "/bookings" },
   { label: "Tickets", to: "/tickets" },
   { label: "Reports", to: "/reports" },
-  { label: "Users", to: "/users", adminOnly: true },
 ];

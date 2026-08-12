@@ -4,6 +4,16 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-08-12 — Moved Users under a Setup dropdown
+
+**What changed:** "Users" no longer sits as its own top-level nav tab next to Reports. It now lives inside a new "Setup" dropdown in the top utility bar (`apps/web/src/components/AppShell/SetupMenu.tsx`), positioned before Help and Sign Out. "Setup" only appears at all for `system_administrator` users — for everyone else it's not there, since there's nothing behind it for them yet. Removed the now-unused `adminOnly` field from `NavTab` and the filtering logic in `PrimaryNav.tsx`, since Users was the only thing using it.
+
+**Why:** Joe reviewed the build and didn't like Users sitting next to the day-to-day nav tabs — matches the same feedback already in `docs/03-deliverables.md` P1-18 (admin/settings functions, not a main-screen tab). User confirmed Setup should be admin-only, and that this dropdown is meant to hold more than just Users going forward (e.g. booking fee groups, later) — `SETUP_ITEMS` in `SetupMenu.tsx` is a plain array specifically so adding the next item is one line, not a rebuild.
+
+**Verified:** typecheck clean. In the browser: logged in as a non-admin (Miriam Roth) — confirmed "Setup" doesn't appear at all. Logged in as the seeded admin — confirmed "Setup" appears, opens a dropdown containing "Users," and clicking it navigates to the same `/users` page as before (unchanged — the admin-only route guard there was already in place).
+
+---
+
 ## 2026-08-12 — Real Clients + Travellers backend, many-to-many
 
 **What changed:** `clients`, `travellers`, and `traveller_accounts` are now real Postgres tables (`apps/api/src/database/schema.sql`), replacing the mock arrays that used to live in `apps/web/src/data/clientsData.ts`/`travellersData.ts` (both deleted — dead once the pages read from the API). A traveller is now its own entity, linkable to more than one client's account via `traveller_accounts`, each link carrying its own free-text `relationship` label (e.g. "self", "employee", "guest") instead of the old one-to-many string match. New `ClientsService`/`ClientsController` (replacing the ping-only stub) and a new `TravellersModule` from scratch — both behind `AuthGuard` only, not `AdminGuard`, since P1-13/14 give client/traveller creation to Offshore Intake Employees and Travel Agents, not just admins. Added `GET /clients/reps`, a plain name-only list separate from the admin-gated `GET /users`, so any logged-in staff member can populate the rep-picker without needing admin rights. The Clients and Travellers pages now fetch live data and have real "+ New Client"/"+ New Traveller" forms — the traveller form can link to more than one client at once, each with its own relationship field.

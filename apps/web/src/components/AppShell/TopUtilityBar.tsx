@@ -1,6 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import type { MouseEvent } from "react";
 import { useAuth } from "../../lib/AuthContext";
+import { SetupMenu } from "./SetupMenu";
 
 type TopUtilityBarProps = {
   query?: string;
@@ -45,13 +46,7 @@ export function TopUtilityBar({ query, onQueryChange }: TopUtilityBarProps) {
       </div>
 
       <div className="ml-[22px] flex items-center gap-5">
-        <a
-          href="#"
-          onClick={(e) => e.preventDefault()}
-          className="text-[13px] text-yb-nav-text underline hover:text-white"
-        >
-          Setup
-        </a>
+        <SetupMenu />
         <a
           href="#"
           onClick={(e) => e.preventDefault()}
