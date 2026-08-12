@@ -4,6 +4,20 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-08-12 — Real Clients + Travellers backend, many-to-many
+
+**What changed:** `clients`, `travellers`, and `traveller_accounts` are now real Postgres tables (`apps/api/src/database/schema.sql`), replacing the mock arrays that used to live in `apps/web/src/data/clientsData.ts`/`travellersData.ts` (both deleted — dead once the pages read from the API). A traveller is now its own entity, linkable to more than one client's account via `traveller_accounts`, each link carrying its own free-text `relationship` label (e.g. "self", "employee", "guest") instead of the old one-to-many string match. New `ClientsService`/`ClientsController` (replacing the ping-only stub) and a new `TravellersModule` from scratch — both behind `AuthGuard` only, not `AdminGuard`, since P1-13/14 give client/traveller creation to Offshore Intake Employees and Travel Agents, not just admins. Added `GET /clients/reps`, a plain name-only list separate from the admin-gated `GET /users`, so any logged-in staff member can populate the rep-picker without needing admin rights. The Clients and Travellers pages now fetch live data and have real "+ New Client"/"+ New Traveller" forms — the traveller form can link to more than one client at once, each with its own relationship field.
+
+**Why:** yesterday's meeting between the user and their boss agreed the client-traveler relationship needed to be many-to-many, not one-to-many, and that "family members" was the wrong vocabulary — many YB Travel clients are businesses, and a real person can travel under more than one account (e.g. flying under a parent's account and their own). `traveller_accounts` was the user's choice of table name for this. Scoped narrowly to this data-model change per the user's explicit answer when this was planned — the other threads from the same meeting (agent workflow restructuring, multi-user time tracking, a Settings nav area) were deliberately set aside for a separate conversation, not built here.
+
+**Also added, not originally planned:** `preferred_rep_id`/`secondary_rep_id` on `clients` reference the real `users` table (P1-10) — a natural follow-on from the Users feature shipped earlier, so client creation picks a rep from the actual staff list instead of a free-text name.
+
+**Deliberately out of scope, flagged not skipped:** full onboarding-stage workflow logic (WhatsApp templates, missing-info reminders, stage-transition rules — P1-05..P1-12) — the meeting notes said detailed planning of this was deferred due to time, so this pass only formalizes the `stage` value set, not the workflow around it. Fine-grained per-role permission enforcement (P1-19) beyond "must be logged in" — same scope boundary as the Users feature. `requestsData.ts` and the Requests page — still mock, untouched.
+
+**Verified:** both apps typecheck clean. Migrated locally and confirmed all three tables via `psql`. Proved the many-to-many end to end, twice — once via `curl` (created a traveller linked to one client, then linked the same traveller to a second client via `POST /clients/:id/travellers`, confirmed `GET /travellers` showed both), and again through the actual browser forms (created a client and a traveller linked to two client accounts at once via the real "+ New Traveller" form, confirmed both relationships render correctly in the Travellers table). Confirmed the Requests page is unaffected.
+
+---
+
 ## 2026-08-11 — Deployed user management to 2.24.28.178
 
 **What changed:** added a fresh `JWT_SECRET` to the server's `.env.deploy` (appended without ever displaying the file's existing contents, since it also holds the Postgres password — read that one line's presence with `grep -c`, not `cat`), synced the new code (`rsync`, excluding `.env.deploy` so the server's real secrets file was never overwritten by a local placeholder), rebuilt both images, and restarted the stack.

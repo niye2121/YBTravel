@@ -1,4 +1,12 @@
-import type { CreateUserInput, LoginResponse, User } from "@yb-travel/shared";
+import type {
+  Client,
+  CreateClientInput,
+  CreateTravellerInput,
+  CreateUserInput,
+  LoginResponse,
+  Traveller,
+  User,
+} from "@yb-travel/shared";
 import { clearSession, getToken } from "./session";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
@@ -79,6 +87,19 @@ export const usersApi = {
   list: () => request<User[]>("/users"),
   create: (input: CreateUserInput) =>
     request<User>("/users", { method: "POST", body: JSON.stringify(input) }),
+};
+
+export const clientsApi = {
+  list: () => request<Client[]>("/clients"),
+  listReps: () => request<{ id: number; name: string }[]>("/clients/reps"),
+  create: (input: CreateClientInput) =>
+    request<Client>("/clients", { method: "POST", body: JSON.stringify(input) }),
+};
+
+export const travellersApi = {
+  list: () => request<Traveller[]>("/travellers"),
+  create: (input: CreateTravellerInput) =>
+    request<Traveller>("/travellers", { method: "POST", body: JSON.stringify(input) }),
 };
 
 export const messagingApi = {
