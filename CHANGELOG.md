@@ -4,6 +4,14 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-08-30 — Deployed WhatsApp conversation names to 2.24.28.178
+
+**What changed:** synced the display-name build to `/srv/yb-travel`, rebuilt only API and web, and recreated those two containers with `--no-deps`. Startup added the nullable `display_name` column to the existing database and refreshed names through the already-linked WhatsApp session.
+
+**Verified:** all 13 existing group conversations received their WhatsApp group subjects, and one of the two direct `@lid` conversations received its contact name, for 14 readable names out of 15 conversations. The remaining direct chat did not expose a contact/profile name and correctly retains the numeric fallback; a future contact event or incoming message will update it automatically. A refreshed browser inspection confirmed the friendly primary labels and secondary numeric identifiers render in the live inbox. Web and authenticated conversation APIs return `200`, anonymous conversation access remains `401`, and the API logs no display-name persistence errors. The same `yb-travel_yb_travel_baileys_auth` volume remains mounted with all 109 session files; WhatsApp is connected, the linked phone is retained, and no QR scan is requested.
+
+---
+
 ## 2026-08-30 — Show WhatsApp contact and group names in the inbox
 
 **What changed:** conversations now store an optional `display_name`. The Baileys adapter collects saved-contact names, WhatsApp profile names, and group subjects; it also refreshes all existing participating groups whenever the linked session connects. Incoming messages update the name when better information becomes available. The inbox shows the friendly name as the primary label and retains the WhatsApp number/group ID beneath it for identification, falling back to the number when WhatsApp supplies no name.
