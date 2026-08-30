@@ -66,6 +66,7 @@ export type ConversationSummary = {
   id: number;
   whatsappJid: string;
   phoneNumber: string;
+  displayName: string | null;
   lastMessageAt: string | null;
   lastMessageBody: string | null;
 };

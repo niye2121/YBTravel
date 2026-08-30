@@ -3,8 +3,14 @@ export type ConnectionStatus = "qr_pending" | "connected" | "disconnected";
 export type InboundMessage = {
   jid: string;
   phoneNumber: string;
+  displayName: string | null;
   body: string;
   senderJid: string;
+};
+
+export type ConversationName = {
+  jid: string;
+  displayName: string;
 };
 
 export type StatusHandler = (
@@ -14,6 +20,7 @@ export type StatusHandler = (
 ) => void;
 
 export type MessageHandler = (message: InboundMessage) => void;
+export type NameHandler = (name: ConversationName) => void;
 
 /**
  * Domain-defined messaging interface — per CLAUDE.md, every external system
@@ -28,6 +35,7 @@ export interface MessagingChannel {
   getQrCode(): string | null;
   onStatusChange(handler: StatusHandler): void;
   onMessage(handler: MessageHandler): void;
+  onNameChange(handler: NameHandler): void;
   sendMessage(jid: string, text: string): Promise<void>;
 }
 

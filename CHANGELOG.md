@@ -4,6 +4,18 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-08-30 — Show WhatsApp contact and group names in the inbox
+
+**What changed:** conversations now store an optional `display_name`. The Baileys adapter collects saved-contact names, WhatsApp profile names, and group subjects; it also refreshes all existing participating groups whenever the linked session connects. Incoming messages update the name when better information becomes available. The inbox shows the friendly name as the primary label and retains the WhatsApp number/group ID beneath it for identification, falling back to the number when WhatsApp supplies no name.
+
+**Why:** the inbox previously stored and displayed only stripped WhatsApp JIDs, so every group appeared as an unreadable numeric identifier even though WhatsApp knew its subject.
+
+**Session safety:** this does not change or clear Baileys credentials. Deployment retains the existing `yb_travel_baileys_auth` volume and linked phone session.
+
+**Verified locally:** API, web, and shared-package typechecks pass and both production builds succeed. The schema migration was applied twice to the existing development database to confirm the new column is idempotent. Live name refresh and preserved-session checks are verified during deployment below.
+
+---
+
 ## 2026-08-30 — Deployed authenticated WhatsApp access to 2.24.28.178
 
 **What changed:** synced the authenticated messaging build to `/srv/yb-travel`, rebuilt only the API and web images, and recreated only those two containers with `--no-deps`. The Postgres container, `.env.deploy`, and the WhatsApp credential volume were not replaced or modified by the deployment.

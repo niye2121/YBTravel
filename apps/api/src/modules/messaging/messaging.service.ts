@@ -23,12 +23,24 @@ export class MessagingService implements OnModuleInit {
         this.logger.error(`Failed to store inbound message: ${(err as Error).message}`),
       );
     });
+
+    this.channel.onNameChange(({ jid, displayName }) => {
+      this.conversations
+        .updateDisplayName(jid, displayName)
+        .then((conversationId) => {
+          if (conversationId !== null) this.gateway.emitConversationUpdated(conversationId);
+        })
+        .catch((err) =>
+          this.logger.error(`Failed to store WhatsApp display name: ${(err as Error).message}`),
+        );
+    });
   }
 
   private async handleInbound(message: InboundMessage): Promise<void> {
     const conversationId = await this.conversations.findOrCreateConversation(
       message.jid,
       message.phoneNumber,
+      message.displayName,
     );
     await this.conversations.appendMessage(conversationId, "inbound", message.body, message.senderJid);
     this.gateway.emitNewMessage(conversationId);

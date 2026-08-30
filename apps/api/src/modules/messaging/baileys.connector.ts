@@ -8,6 +8,7 @@ import type {
   ConnectionStatus,
   MessageHandler,
   MessagingChannel,
+  NameHandler,
   StatusHandler,
 } from "./messaging-channel.interface";
 
@@ -49,6 +50,8 @@ export class BaileysConnector implements MessagingChannel, OnModuleInit {
   private phoneNumber: string | null = null;
   private readonly statusHandlers: StatusHandler[] = [];
   private readonly messageHandlers: MessageHandler[] = [];
+  private readonly nameHandlers: NameHandler[] = [];
+  private readonly knownNames = new Map<string, string>();
 
   async onModuleInit(): Promise<void> {
     try {
@@ -88,6 +91,14 @@ export class BaileysConnector implements MessagingChannel, OnModuleInit {
         this.phoneNumber = socket.user?.id?.split(":")[0] ?? null;
         this.logger.log(`WhatsApp connected: ${this.phoneNumber ?? "unknown number"}`);
         this.emitStatus();
+        socket
+          .groupFetchAllParticipating()
+          .then((groups) => {
+            Object.values(groups).forEach((group) => this.rememberName(group.id, group.subject));
+          })
+          .catch((err) =>
+            this.logger.warn(`Could not refresh WhatsApp group names: ${(err as Error).message}`),
+          );
       }
 
       if (connection === "close") {
@@ -117,6 +128,37 @@ export class BaileysConnector implements MessagingChannel, OnModuleInit {
       }
     });
 
+    const rememberContacts = (
+      contacts: Array<{
+        id?: string;
+        jid?: string;
+        lid?: string;
+        name?: string;
+        notify?: string;
+        verifiedName?: string;
+      }>,
+    ) => {
+      for (const contact of contacts) {
+        const displayName = contact.name ?? contact.verifiedName ?? contact.notify;
+        if (!displayName) continue;
+        [contact.id, contact.jid, contact.lid]
+          .filter((jid): jid is string => Boolean(jid))
+          .forEach((jid) => this.rememberName(jid, displayName));
+      }
+    };
+
+    socket.ev.on("messaging-history.set", ({ contacts }) => rememberContacts(contacts));
+    socket.ev.on("contacts.upsert", rememberContacts);
+    socket.ev.on("contacts.update", rememberContacts);
+    socket.ev.on("groups.upsert", (groups) => {
+      groups.forEach((group) => this.rememberName(group.id, group.subject));
+    });
+    socket.ev.on("groups.update", (groups) => {
+      groups.forEach((group) => {
+        if (group.id && group.subject) this.rememberName(group.id, group.subject);
+      });
+    });
+
     socket.ev.on("messages.upsert", ({ messages }) => {
       for (const msg of messages) {
         if (msg.key.fromMe) continue;
@@ -125,11 +167,26 @@ export class BaileysConnector implements MessagingChannel, OnModuleInit {
         const body = msg.message?.conversation ?? msg.message?.extendedTextMessage?.text ?? null;
         if (!body) continue;
         const phoneNumber = jid.split("@")[0] ?? jid;
+        const isGroup = jid.endsWith("@g.us");
+        if (!isGroup && msg.pushName) this.rememberName(jid, msg.pushName);
         this.messageHandlers.forEach((handler) =>
-          handler({ jid, phoneNumber, body, senderJid: jid }),
+          handler({
+            jid,
+            phoneNumber,
+            displayName: this.knownNames.get(jid) ?? (!isGroup ? msg.pushName?.trim() || null : null),
+            body,
+            senderJid: msg.key.participant ?? jid,
+          }),
         );
       }
     });
+  }
+
+  private rememberName(jid: string, value: string): void {
+    const displayName = value.trim();
+    if (!displayName || this.knownNames.get(jid) === displayName) return;
+    this.knownNames.set(jid, displayName);
+    this.nameHandlers.forEach((handler) => handler({ jid, displayName }));
   }
 
   private emitStatus(): void {
@@ -154,6 +211,11 @@ export class BaileysConnector implements MessagingChannel, OnModuleInit {
 
   onMessage(handler: MessageHandler): void {
     this.messageHandlers.push(handler);
+  }
+
+  onNameChange(handler: NameHandler): void {
+    this.nameHandlers.push(handler);
+    this.knownNames.forEach((displayName, jid) => handler({ jid, displayName }));
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {

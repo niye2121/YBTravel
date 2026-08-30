@@ -61,13 +61,18 @@ function InboxPage() {
         queryKey: ["messaging", "conversations", payload.conversationId, "messages"],
       });
     };
+    const onConversationUpdated = () => {
+      queryClient.invalidateQueries({ queryKey: ["messaging", "conversations"] });
+    };
 
     socket.on("connection:status", onStatus);
     socket.on("message:new", onNewMessage);
+    socket.on("conversation:updated", onConversationUpdated);
 
     return () => {
       socket.off("connection:status", onStatus);
       socket.off("message:new", onNewMessage);
+      socket.off("conversation:updated", onConversationUpdated);
     };
   }, [queryClient]);
 
@@ -137,7 +142,12 @@ function InboxPage() {
                         active ? "bg-yb-row-hover" : "bg-white hover:bg-yb-row-hover"
                       }`}
                     >
-                      <div className="text-[14px] font-bold text-yb-ink">{c.phoneNumber}</div>
+                      <div className="truncate text-[14px] font-bold text-yb-ink">
+                        {c.displayName ?? c.phoneNumber}
+                      </div>
+                      {c.displayName && c.displayName !== c.phoneNumber && (
+                        <div className="truncate text-[11.5px] text-yb-muted4">{c.phoneNumber}</div>
+                      )}
                       <div className="truncate text-[12.5px] text-yb-muted3">
                         {c.lastMessageBody ?? "No messages yet"}
                       </div>
@@ -152,7 +162,13 @@ function InboxPage() {
               </div>
             </Panel>
 
-            <Panel title={selectedConversation ? selectedConversation.phoneNumber : "SELECT A CONVERSATION"}>
+            <Panel
+              title={
+                selectedConversation
+                  ? selectedConversation.displayName ?? selectedConversation.phoneNumber
+                  : "SELECT A CONVERSATION"
+              }
+            >
               {selectedConversation ? (
                 <div className="flex h-[500px] flex-col">
                   <div className="flex-1 space-y-2 overflow-y-auto p-3">

@@ -14,9 +14,15 @@ CREATE TABLE IF NOT EXISTS conversations (
   id SERIAL PRIMARY KEY,
   whatsapp_jid TEXT NOT NULL UNIQUE,
   phone_number TEXT NOT NULL,
+  display_name TEXT,
   last_message_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Existing deployments created conversations before friendly WhatsApp
+-- names were stored. Keep startup migrations idempotent while adding the
+-- column to those databases too.
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS display_name TEXT;
 
 CREATE TABLE IF NOT EXISTS messages (
   id SERIAL PRIMARY KEY,
