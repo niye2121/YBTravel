@@ -19,3 +19,17 @@ export const STAFF_ROLES = [
 export const staffRoleSchema = z.enum(STAFF_ROLES);
 
 export type StaffRole = z.infer<typeof staffRoleSchema>;
+
+/**
+ * Approved initial Phase 1 launch roles. Keep the larger historical vocabulary
+ * above so an existing account is still readable, but only these roles may be
+ * assigned to new users until the deferred operating roles are approved.
+ */
+export const PHASE_ONE_ROLES = [
+  "offshore_intake_employee",
+  "travel_agent",
+  "system_administrator",
+] as const;
+
+export const phaseOneRoleSchema = z.enum(PHASE_ONE_ROLES);
+export type PhaseOneRole = z.infer<typeof phaseOneRoleSchema>;

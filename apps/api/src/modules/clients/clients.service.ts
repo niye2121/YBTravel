@@ -1,6 +1,6 @@
 import { BadRequestException, Inject, Injectable } from "@nestjs/common";
 import type { Pool } from "pg";
-import type { Client, CreateClientInput, OnboardingStage } from "@yb-travel/shared";
+import type { Client, CreateClientInput } from "@yb-travel/shared";
 import { PG_POOL } from "../../database/database.module";
 
 type ClientRow = {
@@ -13,6 +13,7 @@ type ClientRow = {
   booking_fee_group_id: number | null;
   booking_fee_group_name: string;
   stage: string;
+  stage_name: string;
   created_at: string;
 };
 
@@ -26,19 +27,23 @@ function toClient(row: ClientRow): Client {
     secondaryRepName: row.secondary_rep_name,
     bookingFeeGroupId: row.booking_fee_group_id,
     bookingFeeGroupName: row.booking_fee_group_name,
-    stage: row.stage as OnboardingStage,
+    stage: row.stage,
+    stageName: row.stage_name,
     createdAt: row.created_at,
   };
 }
 
 const SELECT_CLIENT = `
-  SELECT c.id, c.name, c.stage, c.created_at,
+  SELECT c.id, c.name, c.stage,
+         COALESCE(os.name, initcap(replace(c.stage, '_', ' '))) AS stage_name,
+         c.created_at,
          c.booking_fee_group_id,
          COALESCE(bfg.name, initcap(replace(c.fee_group, '_', ' '))) AS booking_fee_group_name,
          c.preferred_rep_id, pu.name AS preferred_rep_name,
          c.secondary_rep_id, su.name AS secondary_rep_name
   FROM clients c
   LEFT JOIN booking_fee_groups bfg ON bfg.id = c.booking_fee_group_id
+  LEFT JOIN onboarding_stages os ON os.code = c.stage
   LEFT JOIN users pu ON pu.id = c.preferred_rep_id
   LEFT JOIN users su ON su.id = c.secondary_rep_id
 `;

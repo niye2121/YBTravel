@@ -4,13 +4,14 @@ import { useAuth } from "../../lib/AuthContext";
 
 /**
  * Admin-only settings dropdown, per Joe's review feedback — Users (and
- * anything else administrative added later, e.g. booking fee groups) lives
- * here instead of as its own top-level nav tab. Only System Administrators
- * see this at all; there's nothing behind it for anyone else yet.
+ * the rest of the Phase 1 business configuration lives here instead of as
+ * top-level operational navigation. Only System Administrators see it.
  */
 const SETUP_ITEMS = [
-  { label: "Users", to: "/users" as const },
+  { label: "Setup Overview", to: "/setup" as const },
+  { label: "Users & Roles", to: "/users" as const },
   { label: "Booking Fees", to: "/booking-fees" as const },
+  { label: "Onboarding & Required Info", to: "/onboarding-settings" as const },
 ];
 
 export function SetupMenu() {

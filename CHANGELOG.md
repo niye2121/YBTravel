@@ -4,6 +4,20 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-08-30 — Phase 1 Setup overview, editable onboarding, and required information
+
+**What changed:** expanded the administrator-only Setup area into a Phase 1 configuration overview. It now shows eight business-controlled areas: Users & Roles, Booking Fees, Onboarding Workflow, Required Information, Message Templates, Request Workflow, Assignment & Reminders, and WhatsApp Integration. The first four link to working configuration screens. New user assignments now offer only the three approved launch roles: Offshore Intake Employee, Travel Agent, and System Administrator; historical role values remain readable rather than being destructively removed. The last four areas are deliberately marked **Needs decisions** so the product structure is visible without hardcoding unapproved templates, deadlines, capacity rules, escalation timing, or WhatsApp policy.
+
+**Onboarding configuration:** added editable onboarding-stage records with stable codes, display names, descriptions, order, active status, a single completion-stage designation, and a reviewed-information completion gate. Each stage can also define a future milestone task's responsible Phase 1 role, priority, and expected duration. The six approved defaults are New inquiry, Welcome sent, Waiting for information, Information received, Review complete, and Fully onboarded. Client lists now resolve stage display names from this configuration instead of a hardcoded label map.
+
+**Required-information configuration:** added editable client, traveller, and request field rules with required, staff-review, order, and active controls. The four approved fields—legal names, date of birth, airports, and travel dates—start required and review-gated. Cabin class, flexibility, and special requests are present but optional until their business requirement is approved.
+
+**Permissions and audit:** all authenticated staff can read active workflow rules for operational screens, while only System Administrators can see inactive records or create/change configuration. Every stage and information-rule mutation records the actor and before/after state transactionally in `audit_events`. The database allows configurable future stage codes, rejects a second completion stage, and applies the new schema and defaults idempotently.
+
+**Verified locally:** API, web, and shared-package typechecks pass; both production builds succeed; the SQL migration applies cleanly twice. API integration checks confirmed anonymous access is `401`, staff can read active rules but receive `403` from administration and mutation endpoints, administrators can create/update both setting types, a second completion stage returns `409`, and four transactional audit events contain the expected before/after history. Temporary test records were removed afterward.
+
+---
+
 ## 2026-08-30 — Configurable booking fees and passenger calculation rules
 
 **What changed:** added an administrator-only **Setup → Booking Fees** area backed by real `booking_fee_groups` records. Administrators can create and edit a group name, stable code, decimal amount, ISO currency, calculation basis (per passenger or once per booking), adult/child/infant inclusion rules, and active status. The form includes a live passenger-count calculator so a rule can be checked before saving. Inactive records stay available to administrators for review or reactivation rather than being destructively deleted.

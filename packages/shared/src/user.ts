@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { staffRoleSchema } from "./roles";
+import { phaseOneRoleSchema, staffRoleSchema } from "./roles";
 
 /**
  * The safe user shape — what the API returns and the frontend displays.
@@ -23,7 +23,7 @@ export const createUserSchema = z.object({
   name: z.string().min(1, "Name is required"),
   email: z.string().email(),
   password: z.string().min(8, "Password must be at least 8 characters"),
-  roles: z.array(staffRoleSchema).min(1, "Select at least one role"),
+  roles: z.array(phaseOneRoleSchema).min(1, "Select at least one role"),
 });
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 

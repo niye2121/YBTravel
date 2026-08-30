@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type FormEvent } from "react";
-import type { Client, OnboardingStage } from "@yb-travel/shared";
+import type { Client } from "@yb-travel/shared";
 import { AppHeader } from "../components/AppShell/AppHeader";
 import { FilterStrip } from "../components/AppShell/FilterStrip";
 import { PrimaryButton, SecondaryButton } from "../components/AppShell/buttons";
@@ -15,15 +15,6 @@ export const Route = createFileRoute("/clients")({
 
 const selectClass =
   "h-[28px] rounded-yb border border-yb-line-btn bg-white px-[6px] text-[13.5px] font-bold text-yb-ink";
-
-const STAGE_LABELS: Record<OnboardingStage, string> = {
-  new_inquiry: "New inquiry",
-  welcome_sent: "Welcome sent",
-  waiting_for_info: "Waiting for info",
-  information_received: "Information received",
-  review_complete: "Review complete",
-  fully_onboarded: "Fully onboarded",
-};
 
 function matchesFilter(client: Client, filter: string, currentUserId: number | undefined): boolean {
   switch (filter) {
@@ -93,7 +84,7 @@ function ClientsPage() {
     return allClients
       .filter((c) => matchesFilter(c, filter, user?.id))
       .filter((c) =>
-        q ? [c.name, c.preferredRepName ?? "", STAGE_LABELS[c.stage]].join(" ").toLowerCase().includes(q) : true,
+        q ? [c.name, c.preferredRepName ?? "", c.stageName].join(" ").toLowerCase().includes(q) : true,
       );
   }, [allClients, filter, query, user?.id]);
 
@@ -299,7 +290,7 @@ function ClientsPage() {
                     {c.bookingFeeGroupName}
                   </td>
                   <td className="border-b border-yb-line-row px-2 py-[11px] text-yb-ink2">
-                    {STAGE_LABELS[c.stage]}
+                    {c.stageName}
                   </td>
                   <td className="border-b border-yb-line-row py-[11px] pr-[14px] pl-2 text-right text-yb-muted3">
                     {new Date(c.createdAt).toLocaleDateString()}

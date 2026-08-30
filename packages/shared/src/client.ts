@@ -33,7 +33,8 @@ export const clientSchema = z.object({
   secondaryRepName: z.string().nullable(),
   bookingFeeGroupId: z.number().nullable(),
   bookingFeeGroupName: z.string(),
-  stage: onboardingStageSchema,
+  stage: z.string(),
+  stageName: z.string(),
   createdAt: z.string(),
 });
 export type Client = z.infer<typeof clientSchema>;

@@ -90,6 +90,70 @@ CREATE TABLE IF NOT EXISTS booking_fee_groups (
 CREATE UNIQUE INDEX IF NOT EXISTS booking_fee_groups_lower_name_uq
   ON booking_fee_groups (lower(name));
 
+-- Editable Phase 1 onboarding workflow. Codes are stable identifiers used by
+-- client records; administrators edit labels, order, completion gates, and
+-- optional milestone-task defaults without changing application code.
+CREATE TABLE IF NOT EXISTS onboarding_stages (
+  id SERIAL PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  position INTEGER NOT NULL CHECK (position >= 0),
+  active BOOLEAN NOT NULL DEFAULT true,
+  completion_stage BOOLEAN NOT NULL DEFAULT false,
+  blocks_completion_until_reviewed BOOLEAN NOT NULL DEFAULT false,
+  generates_task BOOLEAN NOT NULL DEFAULT false,
+  responsible_role TEXT,
+  task_priority TEXT NOT NULL DEFAULT 'normal'
+    CHECK (task_priority IN ('low', 'normal', 'high', 'urgent')),
+  expected_duration_minutes INTEGER CHECK (expected_duration_minutes > 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS onboarding_stages_one_completion_uq
+  ON onboarding_stages (completion_stage) WHERE completion_stage = true;
+
+INSERT INTO onboarding_stages
+  (code, name, description, position, completion_stage, blocks_completion_until_reviewed)
+VALUES
+  ('new_inquiry', 'New inquiry', 'A new client inquiry has been received.', 10, false, false),
+  ('welcome_sent', 'Welcome sent', 'The approved welcome message has been sent.', 20, false, false),
+  ('waiting_for_info', 'Waiting for information', 'Required client or traveller information is still missing.', 30, false, false),
+  ('information_received', 'Information received', 'The requested information has been received and is ready for review.', 40, false, false),
+  ('review_complete', 'Review complete', 'Required information has been reviewed by staff.', 50, false, false),
+  ('fully_onboarded', 'Fully onboarded', 'The client passed all required review gates.', 60, true, true)
+ON CONFLICT (code) DO NOTHING;
+
+-- Required and optional data rules drive missing-information lists and the
+-- completion gate. Only the four explicitly approved fields start required;
+-- the other Phase 1 request details are visible but optional until approved.
+CREATE TABLE IF NOT EXISTS required_information_fields (
+  id SERIAL PRIMARY KEY,
+  entity_type TEXT NOT NULL CHECK (entity_type IN ('client', 'traveller', 'request')),
+  field_key TEXT NOT NULL,
+  label TEXT NOT NULL,
+  required BOOLEAN NOT NULL DEFAULT false,
+  requires_review BOOLEAN NOT NULL DEFAULT false,
+  position INTEGER NOT NULL CHECK (position >= 0),
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (entity_type, field_key)
+);
+
+INSERT INTO required_information_fields
+  (entity_type, field_key, label, required, requires_review, position)
+VALUES
+  ('traveller', 'legal_names', 'Legal names', true, true, 10),
+  ('traveller', 'date_of_birth', 'Date of birth', true, true, 20),
+  ('request', 'airports', 'Airports', true, true, 30),
+  ('request', 'travel_dates', 'Travel dates', true, true, 40),
+  ('request', 'cabin_class', 'Cabin class', false, false, 50),
+  ('request', 'flexibility', 'Date or airport flexibility', false, false, 60),
+  ('request', 'special_requests', 'Special requests', false, false, 70)
+ON CONFLICT (entity_type, field_key) DO NOTHING;
+
 -- Client accounts — P1-02/03/05/10 in docs/03-deliverables.md. "name" is
 -- deliberately generic (not "family name") since many YB Travel clients are
 -- businesses, not individuals. Reps reference real staff accounts so client
@@ -112,6 +176,11 @@ CREATE TABLE IF NOT EXISTS clients (
 -- assignments use the configurable record relationship below.
 ALTER TABLE clients
   ADD COLUMN IF NOT EXISTS booking_fee_group_id INTEGER REFERENCES booking_fee_groups(id);
+
+-- The initial prototype constrained stage codes to six hardcoded values.
+-- The stage catalogue now owns that vocabulary, so remove the old check and
+-- allow administrators to add future stages without another migration.
+ALTER TABLE clients DROP CONSTRAINT IF EXISTS clients_stage_check;
 
 -- A traveller is a person, not something one client owns — P1-04. This is
 -- what makes the many-to-many link below possible: a traveller exists

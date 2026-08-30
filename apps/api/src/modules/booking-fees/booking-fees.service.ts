@@ -1,6 +1,7 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { Pool, PoolClient } from "pg";
+import type { Pool } from "pg";
 import { PG_POOL } from "../../database/database.module";
+import { recordAudit } from "../../database/audit";
 
 export type CalculationBasis = "per_passenger" | "per_booking";
 
@@ -64,28 +65,6 @@ function isUniqueViolation(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "23505";
 }
 
-async function recordAudit(
-  client: PoolClient,
-  actorUserId: number,
-  action: string,
-  entityId: number,
-  beforeState: BookingFeeGroup | null,
-  afterState: BookingFeeGroup,
-): Promise<void> {
-  await client.query(
-    `INSERT INTO audit_events
-       (actor_user_id, action, entity_type, entity_id, before_state, after_state)
-     VALUES ($1, $2, 'booking_fee_group', $3, $4::jsonb, $5::jsonb)`,
-    [
-      actorUserId,
-      action,
-      String(entityId),
-      beforeState === null ? null : JSON.stringify(beforeState),
-      JSON.stringify(afterState),
-    ],
-  );
-}
-
 @Injectable()
 export class BookingFeesService {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
@@ -125,7 +104,15 @@ export class BookingFeesService {
       const row = result.rows[0];
       if (!row) throw new Error("Failed to create booking fee group");
       const created = toBookingFeeGroup(row);
-      await recordAudit(client, actorUserId, "booking_fee_group.created", created.id, null, created);
+      await recordAudit(
+        client,
+        actorUserId,
+        "booking_fee_group.created",
+        "booking_fee_group",
+        created.id,
+        null,
+        created,
+      );
       await client.query("COMMIT");
       return created;
     } catch (error) {
@@ -186,6 +173,7 @@ export class BookingFeesService {
         client,
         actorUserId,
         "booking_fee_group.updated",
+        "booking_fee_group",
         updated.id,
         toBookingFeeGroup(existingRow),
         updated,

@@ -7,8 +7,8 @@ import { UsersService } from "./users.service";
 
 /**
  * Defined locally rather than imported from @yb-travel/shared — see the
- * comment in auth.controller.ts. Keep this role list in sync with
- * STAFF_ROLES in packages/shared/src/roles.ts.
+ * comment in auth.controller.ts. New assignments are limited to the three
+ * approved Phase 1 launch roles; historical role values remain readable.
  */
 const createUserSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -19,9 +19,6 @@ const createUserSchema = z.object({
       z.enum([
         "offshore_intake_employee",
         "travel_agent",
-        "supervisor_manager",
-        "ticketing_agent",
-        "finance_user",
         "system_administrator",
       ]),
     )

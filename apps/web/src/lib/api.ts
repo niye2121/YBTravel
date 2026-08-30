@@ -100,6 +100,55 @@ export type BookingFeeGroup = {
 
 export type BookingFeeGroupInput = Omit<BookingFeeGroup, "id" | "createdAt" | "updatedAt">;
 
+export type TaskPriority = "low" | "normal" | "high" | "urgent";
+export type SetupRole =
+  | "offshore_intake_employee"
+  | "travel_agent"
+  | "system_administrator";
+export type RequirementEntity = "client" | "traveller" | "request";
+
+export type OnboardingStageSetting = {
+  id: number;
+  code: string;
+  name: string;
+  description: string;
+  position: number;
+  active: boolean;
+  completionStage: boolean;
+  blocksCompletionUntilReviewed: boolean;
+  generatesTask: boolean;
+  responsibleRole: SetupRole | null;
+  taskPriority: TaskPriority;
+  expectedDurationMinutes: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OnboardingStageInput = Omit<OnboardingStageSetting, "id" | "createdAt" | "updatedAt">;
+
+export type RequiredInformationField = {
+  id: number;
+  entityType: RequirementEntity;
+  fieldKey: string;
+  label: string;
+  required: boolean;
+  requiresReview: boolean;
+  position: number;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RequiredInformationFieldInput = Omit<
+  RequiredInformationField,
+  "id" | "createdAt" | "updatedAt"
+>;
+
+export type WorkflowSettings = {
+  stages: OnboardingStageSetting[];
+  requiredFields: RequiredInformationField[];
+};
+
 export const authApi = {
   login: (email: string, password: string) =>
     request<LoginResponse>("/auth/login", {
@@ -124,6 +173,31 @@ export const bookingFeesApi = {
     }),
   update: (id: number, input: BookingFeeGroupInput) =>
     request<BookingFeeGroup>(`/booking-fees/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+};
+
+export const workflowSettingsApi = {
+  listActive: () => request<WorkflowSettings>("/workflow-settings"),
+  listAll: () => request<WorkflowSettings>("/workflow-settings/admin"),
+  createStage: (input: OnboardingStageInput) =>
+    request<OnboardingStageSetting>("/workflow-settings/stages", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  updateStage: (id: number, input: OnboardingStageInput) =>
+    request<OnboardingStageSetting>(`/workflow-settings/stages/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  createRequiredField: (input: RequiredInformationFieldInput) =>
+    request<RequiredInformationField>("/workflow-settings/required-fields", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  updateRequiredField: (id: number, input: RequiredInformationFieldInput) =>
+    request<RequiredInformationField>(`/workflow-settings/required-fields/${id}`, {
       method: "PATCH",
       body: JSON.stringify(input),
     }),

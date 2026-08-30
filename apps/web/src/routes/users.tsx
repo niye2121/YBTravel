@@ -1,7 +1,7 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import type { StaffRole } from "@yb-travel/shared";
+import { PHASE_ONE_ROLES, type PhaseOneRole, type StaffRole } from "@yb-travel/shared";
 import { AppHeader } from "../components/AppShell/AppHeader";
 import { PrimaryButton, SecondaryButton } from "../components/AppShell/buttons";
 import { usersApi } from "../lib/api";
@@ -16,7 +16,7 @@ const ROLE_LABELS: Record<StaffRole, string> = {
   finance_user: "Finance User",
   system_administrator: "System Administrator",
 };
-const ALL_ROLES = Object.keys(ROLE_LABELS) as StaffRole[];
+const ASSIGNABLE_ROLES = PHASE_ONE_ROLES;
 
 export const Route = createFileRoute("/users")({
   // Belt-and-suspenders on top of the nav already hiding this tab for
@@ -38,7 +38,7 @@ function UsersPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [roles, setRoles] = useState<StaffRole[]>([]);
+  const [roles, setRoles] = useState<PhaseOneRole[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const createMutation = useMutation({
@@ -62,7 +62,7 @@ function UsersPage() {
     },
   });
 
-  function toggleRole(role: StaffRole) {
+  function toggleRole(role: PhaseOneRole) {
     setRoles((prev) => (prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]));
   }
 
@@ -132,7 +132,7 @@ function UsersPage() {
               Roles — one person may hold more than one
             </div>
             <div className="flex flex-wrap gap-[10px]">
-              {ALL_ROLES.map((role) => (
+              {ASSIGNABLE_ROLES.map((role) => (
                 <label
                   key={role}
                   className="flex items-center gap-[6px] rounded-yb border border-yb-line-btn bg-white px-[10px] py-[6px] text-[13px] text-yb-ink"
