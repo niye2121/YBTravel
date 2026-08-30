@@ -1,6 +1,6 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable } from "@nestjs/common";
 import type { Pool } from "pg";
-import type { Client, CreateClientInput, FeeGroup, OnboardingStage } from "@yb-travel/shared";
+import type { Client, CreateClientInput, OnboardingStage } from "@yb-travel/shared";
 import { PG_POOL } from "../../database/database.module";
 
 type ClientRow = {
@@ -10,7 +10,8 @@ type ClientRow = {
   preferred_rep_name: string | null;
   secondary_rep_id: number | null;
   secondary_rep_name: string | null;
-  fee_group: string;
+  booking_fee_group_id: number | null;
+  booking_fee_group_name: string;
   stage: string;
   created_at: string;
 };
@@ -23,17 +24,21 @@ function toClient(row: ClientRow): Client {
     preferredRepName: row.preferred_rep_name,
     secondaryRepId: row.secondary_rep_id,
     secondaryRepName: row.secondary_rep_name,
-    feeGroup: row.fee_group as FeeGroup,
+    bookingFeeGroupId: row.booking_fee_group_id,
+    bookingFeeGroupName: row.booking_fee_group_name,
     stage: row.stage as OnboardingStage,
     createdAt: row.created_at,
   };
 }
 
 const SELECT_CLIENT = `
-  SELECT c.id, c.name, c.fee_group, c.stage, c.created_at,
+  SELECT c.id, c.name, c.stage, c.created_at,
+         c.booking_fee_group_id,
+         COALESCE(bfg.name, initcap(replace(c.fee_group, '_', ' '))) AS booking_fee_group_name,
          c.preferred_rep_id, pu.name AS preferred_rep_name,
          c.secondary_rep_id, su.name AS secondary_rep_name
   FROM clients c
+  LEFT JOIN booking_fee_groups bfg ON bfg.id = c.booking_fee_group_id
   LEFT JOIN users pu ON pu.id = c.preferred_rep_id
   LEFT JOIN users su ON su.id = c.secondary_rep_id
 `;
@@ -70,10 +75,23 @@ export class ClientsService {
   }
 
   async create(input: CreateClientInput): Promise<Client> {
+    const feeGroup = await this.pool.query(
+      "SELECT 1 FROM booking_fee_groups WHERE id = $1 AND active = true",
+      [input.bookingFeeGroupId],
+    );
+    if ((feeGroup.rowCount ?? 0) === 0) {
+      throw new BadRequestException("Select an active booking fee group");
+    }
+
     const inserted = await this.pool.query<{ id: number }>(
-      `INSERT INTO clients (name, preferred_rep_id, secondary_rep_id, fee_group)
+      `INSERT INTO clients (name, preferred_rep_id, secondary_rep_id, booking_fee_group_id)
        VALUES ($1, $2, $3, $4) RETURNING id`,
-      [input.name, input.preferredRepId ?? null, input.secondaryRepId ?? null, input.feeGroup],
+      [
+        input.name,
+        input.preferredRepId ?? null,
+        input.secondaryRepId ?? null,
+        input.bookingFeeGroupId,
+      ],
     );
     const id = inserted.rows[0]?.id;
     if (!id) throw new Error("Failed to create client");

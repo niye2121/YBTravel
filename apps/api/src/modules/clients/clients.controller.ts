@@ -22,7 +22,7 @@ const createClientSchema = z.object({
   name: z.string().min(1, "Name is required"),
   preferredRepId: z.number().nullable().optional(),
   secondaryRepId: z.number().nullable().optional(),
-  feeGroup: z.enum(["standard", "belev_echad", "scheiman"]).default("standard"),
+  bookingFeeGroupId: z.number().int().positive(),
 });
 
 const linkTravellerSchema = z.object({

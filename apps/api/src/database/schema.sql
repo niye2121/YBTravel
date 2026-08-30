@@ -50,6 +50,46 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Shared audit foundation for meaningful mutations. Domain modules write
+-- actor, action, and before/after JSON here in the same transaction as the
+-- mutation so a successful change cannot exist without its history.
+CREATE TABLE IF NOT EXISTS audit_events (
+  id BIGSERIAL PRIMARY KEY,
+  actor_user_id INTEGER REFERENCES users(id),
+  action TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  before_state JSONB,
+  after_state JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS audit_events_entity_idx
+  ON audit_events (entity_type, entity_id, created_at DESC);
+
+-- Configurable booking-fee groups. Money stays NUMERIC and is returned by
+-- pg as a string so authoritative fee amounts never pass through binary
+-- floating point. Passenger-category toggles apply only to per-passenger
+-- rules; a per-booking rule charges the amount once for the request.
+CREATE TABLE IF NOT EXISTS booking_fee_groups (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  code TEXT NOT NULL UNIQUE,
+  amount NUMERIC(12, 2) NOT NULL CHECK (amount >= 0),
+  currency CHAR(3) NOT NULL,
+  calculation_basis TEXT NOT NULL
+    CHECK (calculation_basis IN ('per_passenger', 'per_booking')),
+  charge_adults BOOLEAN NOT NULL DEFAULT true,
+  charge_children BOOLEAN NOT NULL DEFAULT true,
+  charge_infants BOOLEAN NOT NULL DEFAULT false,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS booking_fee_groups_lower_name_uq
+  ON booking_fee_groups (lower(name));
+
 -- Client accounts — P1-02/03/05/10 in docs/03-deliverables.md. "name" is
 -- deliberately generic (not "family name") since many YB Travel clients are
 -- businesses, not individuals. Reps reference real staff accounts so client
@@ -66,6 +106,12 @@ CREATE TABLE IF NOT EXISTS clients (
                       'information_received', 'review_complete', 'fully_onboarded')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Existing deployments used the legacy fee_group enum-like text column.
+-- Keep it temporarily for backwards compatibility, while all new client
+-- assignments use the configurable record relationship below.
+ALTER TABLE clients
+  ADD COLUMN IF NOT EXISTS booking_fee_group_id INTEGER REFERENCES booking_fee_groups(id);
 
 -- A traveller is a person, not something one client owns — P1-04. This is
 -- what makes the many-to-many link below possible: a traveller exists

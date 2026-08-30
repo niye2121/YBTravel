@@ -11,9 +11,6 @@ import { z } from "zod";
  * this file directly, so real value imports are fine there.
  */
 
-export const feeGroupSchema = z.enum(["standard", "belev_echad", "scheiman"]);
-export type FeeGroup = z.infer<typeof feeGroupSchema>;
-
 export const onboardingStageSchema = z.enum([
   "new_inquiry",
   "welcome_sent",
@@ -34,7 +31,8 @@ export const clientSchema = z.object({
   preferredRepName: z.string().nullable(),
   secondaryRepId: z.number().nullable(),
   secondaryRepName: z.string().nullable(),
-  feeGroup: feeGroupSchema,
+  bookingFeeGroupId: z.number().nullable(),
+  bookingFeeGroupName: z.string(),
   stage: onboardingStageSchema,
   createdAt: z.string(),
 });
@@ -44,7 +42,7 @@ export const createClientSchema = z.object({
   name: z.string().min(1, "Name is required"),
   preferredRepId: z.number().nullable().optional(),
   secondaryRepId: z.number().nullable().optional(),
-  feeGroup: feeGroupSchema.default("standard"),
+  bookingFeeGroupId: z.number().int().positive(),
 });
 export type CreateClientInput = z.infer<typeof createClientSchema>;
 

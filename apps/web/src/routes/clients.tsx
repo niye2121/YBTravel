@@ -1,12 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type FormEvent } from "react";
-import type { Client, FeeGroup, OnboardingStage } from "@yb-travel/shared";
+import type { Client, OnboardingStage } from "@yb-travel/shared";
 import { AppHeader } from "../components/AppShell/AppHeader";
 import { FilterStrip } from "../components/AppShell/FilterStrip";
 import { PrimaryButton, SecondaryButton } from "../components/AppShell/buttons";
 import { useAuth } from "../lib/AuthContext";
-import { clientsApi } from "../lib/api";
+import { bookingFeesApi, clientsApi } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
 
 export const Route = createFileRoute("/clients")({
@@ -23,12 +23,6 @@ const STAGE_LABELS: Record<OnboardingStage, string> = {
   information_received: "Information received",
   review_complete: "Review complete",
   fully_onboarded: "Fully onboarded",
-};
-
-const FEE_GROUP_LABELS: Record<FeeGroup, string> = {
-  standard: "Standard",
-  belev_echad: "Belev Echad",
-  scheiman: "Scheiman",
 };
 
 function matchesFilter(client: Client, filter: string, currentUserId: number | undefined): boolean {
@@ -51,6 +45,7 @@ function ClientsPage() {
   const queryClient = useQueryClient();
   const clientsQuery = useQuery({ queryKey: ["clients"], queryFn: clientsApi.list });
   const repsQuery = useQuery({ queryKey: ["clients", "reps"], queryFn: clientsApi.listReps });
+  const feeGroupsQuery = useQuery({ queryKey: ["booking-fees", "active"], queryFn: bookingFeesApi.listActive });
 
   const [filter, setFilter] = useState("All Clients");
   const [query, setQuery] = useState("");
@@ -60,7 +55,7 @@ function ClientsPage() {
   const [name, setName] = useState("");
   const [preferredRepId, setPreferredRepId] = useState("");
   const [secondaryRepId, setSecondaryRepId] = useState("");
-  const [feeGroup, setFeeGroup] = useState<FeeGroup>("standard");
+  const [bookingFeeGroupId, setBookingFeeGroupId] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const createMutation = useMutation({
@@ -71,7 +66,7 @@ function ClientsPage() {
       setName("");
       setPreferredRepId("");
       setSecondaryRepId("");
-      setFeeGroup("standard");
+      setBookingFeeGroupId("");
       setError(null);
     },
     onError: (err: unknown) => setError(err instanceof Error ? err.message : "Failed to create client"),
@@ -104,11 +99,15 @@ function ClientsPage() {
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!bookingFeeGroupId) {
+      setError("Create and select an active booking fee group first");
+      return;
+    }
     createMutation.mutate({
       name,
       preferredRepId: preferredRepId ? Number(preferredRepId) : null,
       secondaryRepId: secondaryRepId ? Number(secondaryRepId) : null,
-      feeGroup,
+      bookingFeeGroupId: Number(bookingFeeGroupId),
     });
   }
 
@@ -157,16 +156,23 @@ function ClientsPage() {
             <label className="flex-1 text-[13px] text-yb-muted">
               Fee group
               <select
-                value={feeGroup}
-                onChange={(e) => setFeeGroup(e.target.value as FeeGroup)}
+                required
+                value={bookingFeeGroupId}
+                onChange={(e) => setBookingFeeGroupId(e.target.value)}
                 className="mt-1 h-[32px] w-full rounded-yb border border-yb-line-btn bg-white px-[9px] text-[14px] text-yb-ink"
               >
-                {(Object.keys(FEE_GROUP_LABELS) as FeeGroup[]).map((fg) => (
-                  <option key={fg} value={fg}>
-                    {FEE_GROUP_LABELS[fg]}
+                <option value="">Select fee group</option>
+                {(feeGroupsQuery.data ?? []).map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name} — {group.currency} {group.amount}
                   </option>
                 ))}
               </select>
+              {!feeGroupsQuery.isLoading && (feeGroupsQuery.data?.length ?? 0) === 0 && (
+                <span className="mt-[4px] block text-[11.5px] text-yb-red">
+                  An administrator must create an active group in Setup → Booking Fees.
+                </span>
+              )}
             </label>
             <label className="flex-1 text-[13px] text-yb-muted">
               Preferred rep
@@ -203,7 +209,10 @@ function ClientsPage() {
           {error && <div className="mt-[10px] text-[13px] text-yb-red">{error}</div>}
 
           <div className="mt-[14px] flex gap-[10px]">
-            <PrimaryButton type="submit" disabled={createMutation.isPending}>
+            <PrimaryButton
+              type="submit"
+              disabled={createMutation.isPending || (feeGroupsQuery.data?.length ?? 0) === 0}
+            >
               {createMutation.isPending ? "Creating…" : "Create Client"}
             </PrimaryButton>
             <SecondaryButton type="button" onClick={() => setShowForm(false)}>
@@ -287,7 +296,7 @@ function ClientsPage() {
                     {c.secondaryRepName ?? "—"}
                   </td>
                   <td className="border-b border-yb-line-row px-2 py-[11px] text-yb-ink2">
-                    {FEE_GROUP_LABELS[c.feeGroup]}
+                    {c.bookingFeeGroupName}
                   </td>
                   <td className="border-b border-yb-line-row px-2 py-[11px] text-yb-ink2">
                     {STAGE_LABELS[c.stage]}

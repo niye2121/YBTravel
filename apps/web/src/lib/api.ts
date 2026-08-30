@@ -80,6 +80,26 @@ export type MessageRecord = {
   createdAt: string;
 };
 
+export type CalculationBasis = "per_passenger" | "per_booking";
+
+export type BookingFeeGroup = {
+  id: number;
+  name: string;
+  code: string;
+  /** Decimal money value from PostgreSQL; kept as text to avoid float authority. */
+  amount: string;
+  currency: string;
+  calculationBasis: CalculationBasis;
+  chargeAdults: boolean;
+  chargeChildren: boolean;
+  chargeInfants: boolean;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BookingFeeGroupInput = Omit<BookingFeeGroup, "id" | "createdAt" | "updatedAt">;
+
 export const authApi = {
   login: (email: string, password: string) =>
     request<LoginResponse>("/auth/login", {
@@ -92,6 +112,21 @@ export const usersApi = {
   list: () => request<User[]>("/users"),
   create: (input: CreateUserInput) =>
     request<User>("/users", { method: "POST", body: JSON.stringify(input) }),
+};
+
+export const bookingFeesApi = {
+  listActive: () => request<BookingFeeGroup[]>("/booking-fees"),
+  listAll: () => request<BookingFeeGroup[]>("/booking-fees/admin"),
+  create: (input: BookingFeeGroupInput) =>
+    request<BookingFeeGroup>("/booking-fees", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  update: (id: number, input: BookingFeeGroupInput) =>
+    request<BookingFeeGroup>(`/booking-fees/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
 };
 
 export const clientsApi = {

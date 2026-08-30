@@ -4,6 +4,18 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-08-30 — Configurable booking fees and passenger calculation rules
+
+**What changed:** added an administrator-only **Setup → Booking Fees** area backed by real `booking_fee_groups` records. Administrators can create and edit a group name, stable code, decimal amount, ISO currency, calculation basis (per passenger or once per booking), adult/child/infant inclusion rules, and active status. The form includes a live passenger-count calculator so a rule can be checked before saving. Inactive records stay available to administrators for review or reactivation rather than being destructively deleted.
+
+**Client integration:** the New Client form no longer uses the three hardcoded Standard/Belev Echad/Scheiman labels. It loads active configured fee groups from the API and stores the selected record ID. Existing clients retain a readable fallback from the legacy `fee_group` field while deployments migrate safely; new assignments use `booking_fee_group_id`.
+
+**Permissions, audit, and data safety:** authenticated staff may list active groups for client assignment, but only System Administrators can list inactive records, create groups, or change them. Every create/update writes the actor, action, timestamp, and before/after JSON to the shared `audit_events` table in the same database transaction. Fee amounts use PostgreSQL `NUMERIC(12,2)` and cross the API as decimal strings, not authoritative JavaScript floating-point numbers. The API validates currency, stable codes, two-decimal precision, and requires at least one passenger category for per-passenger rules.
+
+**Verified locally:** API, web, and shared-package typechecks pass; both production builds succeed. The SQL migration applies cleanly twice. API integration checks confirmed anonymous access is `401`, ordinary staff can read active groups but receive `403` from administration and mutation endpoints, administrators can create/update groups, invalid three-decimal money is rejected with `400`, and client creation resolves the configured group name. Exact temporary test records were removed afterward.
+
+---
+
 ## 2026-08-30 — Deployed WhatsApp conversation names to 2.24.28.178
 
 **What changed:** synced the display-name build to `/srv/yb-travel`, rebuilt only API and web, and recreated those two containers with `--no-deps`. Startup added the nullable `display_name` column to the existing database and refreshed names through the already-linked WhatsApp session.

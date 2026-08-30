@@ -8,7 +8,10 @@ import { useAuth } from "../../lib/AuthContext";
  * here instead of as its own top-level nav tab. Only System Administrators
  * see this at all; there's nothing behind it for anyone else yet.
  */
-const SETUP_ITEMS = [{ label: "Users", to: "/users" as const }];
+const SETUP_ITEMS = [
+  { label: "Users", to: "/users" as const },
+  { label: "Booking Fees", to: "/booking-fees" as const },
+];
 
 export function SetupMenu() {
   const { isAdmin } = useAuth();
