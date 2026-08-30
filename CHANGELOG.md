@@ -4,6 +4,14 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-08-30 — Deployed authenticated WhatsApp access to 2.24.28.178
+
+**What changed:** synced the authenticated messaging build to `/srv/yb-travel`, rebuilt only the API and web images, and recreated only those two containers with `--no-deps`. The Postgres container, `.env.deploy`, and the WhatsApp credential volume were not replaced or modified by the deployment.
+
+**Verified:** the web app and API health endpoint return `200`. All messaging reads and the send endpoint return `401` without a token. Authenticated status and conversation reads return `200`; anonymous Socket.IO connections are rejected and authenticated connections succeed. The `yb-travel_yb_travel_baileys_auth` volume remained mounted with the same 109 files before and after deployment. WhatsApp reports `connected`, retains the linked phone, and does not request a QR scan.
+
+---
+
 ## 2026-08-30 — Require authentication for WhatsApp REST and WebSocket access
 
 **What changed:** every `/messaging/*` REST endpoint now uses the existing `AuthGuard`, including status, conversation history, message history, and sending. The Socket.IO gateway now rejects the handshake unless it receives a valid application JWT and confirms the user still exists in the database. The web client supplies its JWT in Socket.IO's authentication payload and actively disconnects its socket on sign-out, account changes, or an expired REST session.
