@@ -8,6 +8,7 @@ import type {
   User,
 } from "@yb-travel/shared";
 import { clearSession, getToken } from "./session";
+import { disconnectSocket } from "./socket";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
 
@@ -44,7 +45,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     // A stale/expired token isn't recoverable — clear it so the next
     // navigation's route guard sends the user back to /login.
-    if (res.status === 401) clearSession();
+    if (res.status === 401) {
+      disconnectSocket();
+      clearSession();
+    }
     throw new Error(await extractErrorMessage(res));
   }
   return res.json() as Promise<T>;

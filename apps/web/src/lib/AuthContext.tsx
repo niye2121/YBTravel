@@ -2,6 +2,7 @@ import { createContext, useContext, useMemo, useState, type ReactNode } from "re
 import type { User } from "@yb-travel/shared";
 import { authApi } from "./api";
 import { clearSession, getStoredUser, hasAdminRole, saveSession } from "./session";
+import { disconnectSocket } from "./socket";
 
 type AuthContextValue = {
   user: User | null;
@@ -27,10 +28,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAdmin: hasAdminRole(user),
       login: async (email, password) => {
         const { token, user: loggedInUser } = await authApi.login(email, password);
+        disconnectSocket();
         saveSession(token, loggedInUser);
         setUser(loggedInUser);
       },
       logout: () => {
+        disconnectSocket();
         clearSession();
         setUser(null);
       },

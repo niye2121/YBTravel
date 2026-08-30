@@ -4,6 +4,18 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-08-30 — Require authentication for WhatsApp REST and WebSocket access
+
+**What changed:** every `/messaging/*` REST endpoint now uses the existing `AuthGuard`, including status, conversation history, message history, and sending. The Socket.IO gateway now rejects the handshake unless it receives a valid application JWT and confirms the user still exists in the database. The web client supplies its JWT in Socket.IO's authentication payload and actively disconnects its socket on sign-out, account changes, or an expired REST session.
+
+**Why:** WhatsApp conversations can contain personal, passport, and payment information. Previously, anonymous callers could read messaging data, send messages, connect to the gateway, and receive broadcasts.
+
+**Session safety:** this is an access-control change only. It does not change Baileys authentication storage or delete `.baileys-auth`; deployment retains the existing `yb_travel_baileys_auth` Docker volume so the linked WhatsApp account can reconnect without another QR scan.
+
+**Verified locally:** API, web, and shared-package typechecks pass and both production builds succeed. Integration checks against the running API confirmed all four messaging operations return `401` anonymously (status, conversations, message history, and sending), while authenticated status and conversation reads return `200`. An anonymous Socket.IO handshake is rejected with `Unauthorized`; the same client connects successfully with a valid JWT. Server rollout will be verified separately.
+
+---
+
 ## 2026-08-12 — Auto-recover the WhatsApp connection after a real logout
 
 **What changed:** `apps/api/src/modules/messaging/baileys.connector.ts` — on a genuine logout (WhatsApp's `DisconnectReason.loggedOut`), the connector now clears the stale `.baileys-auth` session files and immediately reconnects, which makes Baileys generate a fresh QR code. Previously it just logged a warning and stopped — the Inbox screen would sit on "disconnected" with no way to recover short of someone SSHing into the server, deleting files by hand, and restarting the container.
