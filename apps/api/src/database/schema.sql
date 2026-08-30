@@ -182,6 +182,23 @@ ALTER TABLE clients
 -- allow administrators to add future stages without another migration.
 ALTER TABLE clients DROP CONSTRAINT IF EXISTS clients_stage_check;
 
+-- A minimal real request record for integration links. The operational
+-- Requests queue is still being migrated from its prototype, but external
+-- records must reference an actual request rather than a frontend-only row.
+CREATE SEQUENCE IF NOT EXISTS travel_request_number_seq START WITH 10500;
+
+CREATE TABLE IF NOT EXISTS travel_requests (
+  id SERIAL PRIMARY KEY,
+  request_number TEXT NOT NULL UNIQUE
+    DEFAULT ('R-' || lpad(nextval('travel_request_number_seq')::text, 5, '0')),
+  client_id INTEGER NOT NULL REFERENCES clients(id),
+  trip_summary TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'new_inquiry',
+  created_by INTEGER REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- A traveller is a person, not something one client owns — P1-04. This is
 -- what makes the many-to-many link below possible: a traveller exists
 -- independently and can be linked to more than one client's account.
@@ -204,4 +221,43 @@ CREATE TABLE IF NOT EXISTS traveller_accounts (
   relationship TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (client_id, traveller_id)
+);
+
+-- WhatsApp groups created from the platform. One request may have at most
+-- one managed group, and the reserved name is unique case-insensitively.
+-- A row is reserved before the provider call so simultaneous clicks cannot
+-- create two external groups for the same request.
+CREATE TABLE IF NOT EXISTS whatsapp_groups (
+  id SERIAL PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id),
+  travel_request_id INTEGER NOT NULL UNIQUE REFERENCES travel_requests(id),
+  conversation_id INTEGER UNIQUE REFERENCES conversations(id),
+  whatsapp_group_jid TEXT UNIQUE,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'creating'
+    CHECK (status IN ('creating', 'active', 'failed')),
+  failure_reason TEXT,
+  created_by INTEGER NOT NULL REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS whatsapp_groups_lower_name_uq
+  ON whatsapp_groups (lower(name));
+
+CREATE TABLE IF NOT EXISTS whatsapp_group_participants (
+  id SERIAL PRIMARY KEY,
+  whatsapp_group_id INTEGER NOT NULL REFERENCES whatsapp_groups(id) ON DELETE CASCADE,
+  participant_type TEXT NOT NULL CHECK (participant_type IN ('traveller', 'staff')),
+  traveller_id INTEGER REFERENCES travellers(id),
+  user_id INTEGER REFERENCES users(id),
+  display_name TEXT NOT NULL,
+  phone_number TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (whatsapp_group_id, phone_number),
+  CHECK (
+    (participant_type = 'traveller' AND traveller_id IS NOT NULL AND user_id IS NULL)
+    OR
+    (participant_type = 'staff' AND user_id IS NOT NULL AND traveller_id IS NULL)
+  )
 );

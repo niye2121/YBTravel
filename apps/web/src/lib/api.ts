@@ -80,6 +80,55 @@ export type MessageRecord = {
   createdAt: string;
 };
 
+export type TravelRequestRecord = {
+  id: number;
+  requestNumber: string;
+  clientId: number;
+  clientName: string;
+  tripSummary: string;
+  status: string;
+  createdAt: string;
+};
+
+export type WhatsAppGroupOptions = {
+  clients: Array<{ id: number; name: string }>;
+  requests: Array<{ id: number; requestNumber: string; clientId: number; tripSummary: string }>;
+  travellers: Array<{ id: number; name: string; clientIds: number[] }>;
+  staff: Array<{ id: number; name: string; roles: string[] }>;
+};
+
+export type GroupParticipantInput = { id: number; phoneNumber: string };
+
+export type CreateWhatsAppGroupInput = {
+  clientId: number;
+  travelRequestId: number;
+  name: string;
+  travellers: GroupParticipantInput[];
+  staff: GroupParticipantInput[];
+};
+
+export type WhatsAppGroupRecord = {
+  id: number;
+  clientId: number;
+  clientName: string;
+  travelRequestId: number;
+  requestNumber: string;
+  tripSummary: string;
+  conversationId: number | null;
+  whatsappGroupId: string | null;
+  name: string;
+  status: "creating" | "active" | "failed";
+  failureReason: string | null;
+  createdByName: string;
+  createdAt: string;
+  participants: Array<{
+    type: "traveller" | "staff";
+    entityId: number;
+    displayName: string;
+    phoneNumber: string;
+  }>;
+};
+
 export type CalculationBasis = "per_passenger" | "per_booking";
 
 export type BookingFeeGroup = {
@@ -216,6 +265,15 @@ export const travellersApi = {
     request<Traveller>("/travellers", { method: "POST", body: JSON.stringify(input) }),
 };
 
+export const requestsApi = {
+  list: () => request<TravelRequestRecord[]>("/requests"),
+  create: (input: { clientId: number; tripSummary: string }) =>
+    request<TravelRequestRecord>("/requests", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+};
+
 export const messagingApi = {
   getStatus: () => request<MessagingStatus>("/messaging/status"),
   listConversations: () => request<ConversationSummary[]>("/messaging/conversations"),
@@ -225,5 +283,12 @@ export const messagingApi = {
     request<{ ok: boolean }>(`/messaging/conversations/${conversationId}/messages`, {
       method: "POST",
       body: JSON.stringify({ text }),
+    }),
+  getGroupOptions: () => request<WhatsAppGroupOptions>("/messaging/groups/options"),
+  listGroups: () => request<WhatsAppGroupRecord[]>("/messaging/groups"),
+  createGroup: (input: CreateWhatsAppGroupInput) =>
+    request<WhatsAppGroupRecord>("/messaging/groups", {
+      method: "POST",
+      body: JSON.stringify(input),
     }),
 };

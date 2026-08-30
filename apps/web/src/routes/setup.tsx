@@ -69,7 +69,7 @@ const SETUP_AREAS: SetupCard[] = [
     title: "WhatsApp Integration",
     purpose: "Manage the shared number, provider behavior, group creation, and manual fallback.",
     status: "Needs decisions",
-    includes: ["Provider and shared number", "Group-creation policy", "Manual fallback", "Document and message handling policy"],
+    includes: ["Authorized group-creator roles", "Group-name template", "Default staff participants", "Provider and manual fallback policy"],
   },
 ];
 

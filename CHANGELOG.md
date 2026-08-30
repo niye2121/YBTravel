@@ -4,6 +4,22 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-08-30 — Create and link WhatsApp groups from YB Travel
+
+**What changed:** added a **WhatsApp Inbox → Manage WhatsApp Groups** workflow. Authorized staff can select a real client and travel request, select only travellers linked to that client, select staff participants, enter each participant's WhatsApp number, and either enter or generate the group name. The generated default combines the client name and unique request number. A minimal real `travel_requests` record and audited request-creation endpoint were added because the existing Requests queue is still frontend mock data and could not provide a valid database relationship.
+
+**Provider integration and session safety:** extended the provider-neutral `MessagingChannel` adapter with group creation and implemented it through Baileys `groupCreate`. Participant numbers are normalized, checked for WhatsApp registration when the provider returns registration results, and the already-connected YB number is rejected from the participant list because WhatsApp includes it automatically. This change does not clear, replace, or rewrite `.baileys-auth`; deployment can retain the existing credential volume exactly as before.
+
+**Data integrity and duplicate protection:** every managed group stores its WhatsApp group JID, final name, client, request, conversation, creator, status, and traveller/staff participants. A request can have only one managed group, group names are unique case-insensitively, and a database reservation is committed before the external provider call so simultaneous clicks cannot create two groups. A failed attempt can be retried only with its reserved name. Before retrying, the adapter checks participating WhatsApp groups for that exact app-reserved name and reuses it if an earlier provider response was lost.
+
+**Authorization and audit:** introduced a reusable database-backed role guard. Everyone authenticated may review managed groups, but group creation currently allows only Travel Agents and System Administrators; Offshore Intake Employees receive `403`. This is a conservative launch default pending approval of the configurable WhatsApp group policy. Request creation remains available to all three approved Phase 1 roles. Request creation, group creation start, successful/reconciled creation, and provider failure are transactionally audited with actor and before/after state.
+
+**Setup decision still required:** the Setup overview now identifies the WhatsApp controls that should become configurable after approval: authorized group-creator roles, the group-name template, default staff participants, and provider/manual-fallback policy. The open decision is recorded in `docs/05-open-decisions.md`; no unapproved Setup values were invented.
+
+**Verified locally:** API, web, and shared typechecks pass; both production builds succeed; the SQL migration applies cleanly twice. A fake-provider integration test confirmed real client/request links, traveller-client validation, participant persistence, WhatsApp group ID/conversation storage, duplicate prevention, failed-attempt persistence, same-name retry, changed-name retry rejection, and audit events, then removed every test record. HTTP tests confirmed anonymous reads return `401`, Offshore Intake can review groups but receives `403` when creating one, and Travel Agents/System Administrators pass the role gate. No real WhatsApp group was created during automated testing.
+
+---
+
 ## 2026-08-30 — Phase 1 Setup overview, editable onboarding, and required information
 
 **What changed:** expanded the administrator-only Setup area into a Phase 1 configuration overview. It now shows eight business-controlled areas: Users & Roles, Booking Fees, Onboarding Workflow, Required Information, Message Templates, Request Workflow, Assignment & Reminders, and WhatsApp Integration. The first four link to working configuration screens. New user assignments now offer only the three approved launch roles: Offshore Intake Employee, Travel Agent, and System Administrator; historical role values remain readable rather than being destructively removed. The last four areas are deliberately marked **Needs decisions** so the product structure is visible without hardcoding unapproved templates, deadlines, capacity rules, escalation timing, or WhatsApp policy.

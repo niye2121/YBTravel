@@ -6,6 +6,7 @@ import pino from "pino";
 import qrcodeTerminal from "qrcode-terminal";
 import type {
   ConnectionStatus,
+  CreatedGroup,
   MessageHandler,
   MessagingChannel,
   NameHandler,
@@ -221,5 +222,39 @@ export class BaileysConnector implements MessagingChannel, OnModuleInit {
   async sendMessage(jid: string, text: string): Promise<void> {
     if (!this.socket) throw new Error("WhatsApp connection not initialized");
     await this.socket.sendMessage(jid, { text });
+  }
+
+  async createGroup(name: string, participantPhoneNumbers: string[]): Promise<CreatedGroup> {
+    if (!this.socket || this.status !== "connected") {
+      throw new Error("WhatsApp is not connected");
+    }
+
+    // A provider response can be lost after WhatsApp creates the group. Before
+    // every attempt, reconcile by the app-reserved unique group name so a retry
+    // links the existing group instead of creating an external duplicate.
+    const participating = await this.socket.groupFetchAllParticipating();
+    const existing = Object.values(participating).find((group) => group.subject === name);
+    if (existing) {
+      this.rememberName(existing.id, existing.subject);
+      return { jid: existing.id, name: existing.subject, reusedExisting: true };
+    }
+
+    const jids = participantPhoneNumbers.map((number) => `${number}@s.whatsapp.net`);
+    const registrations = await this.socket.onWhatsApp(...jids);
+    if (registrations) {
+      const registered = new Set(
+        registrations.filter((item) => Boolean(item.exists)).map((item) => item.jid),
+      );
+      const missing = participantPhoneNumbers.filter(
+        (number) => !registered.has(`${number}@s.whatsapp.net`),
+      );
+      if (missing.length > 0) {
+        throw new Error(`Not registered on WhatsApp: ${missing.map((number) => `+${number}`).join(", ")}`);
+      }
+    }
+
+    const group = await this.socket.groupCreate(name, jids);
+    this.rememberName(group.id, group.subject);
+    return { jid: group.id, name: group.subject, reusedExisting: false };
   }
 }

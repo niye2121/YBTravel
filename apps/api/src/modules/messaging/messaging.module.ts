@@ -6,6 +6,7 @@ import { MESSAGING_CHANNEL } from "./messaging-channel.interface";
 import { MessagingController } from "./messaging.controller";
 import { MessagingGateway } from "./messaging.gateway";
 import { MessagingService } from "./messaging.service";
+import { WhatsAppGroupsService } from "./whatsapp-groups.service";
 
 @Module({
   imports: [AuthModule],
@@ -15,6 +16,7 @@ import { MessagingService } from "./messaging.service";
     ConversationsService,
     MessagingGateway,
     MessagingService,
+    WhatsAppGroupsService,
   ],
 })
 export class MessagingModule {}

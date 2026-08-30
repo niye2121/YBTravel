@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import QRCode from "react-qr-code";
 import { AppHeader } from "../components/AppShell/AppHeader";
@@ -102,6 +102,10 @@ function InboxPage() {
             </span>
           </div>
         </div>
+        <div className="flex-1" />
+        <Link to="/whatsapp-groups" className="text-[13px] font-bold text-yb-green underline">
+          Manage WhatsApp Groups
+        </Link>
       </div>
 
       <div className="px-[22px] pt-4 pb-[26px]">

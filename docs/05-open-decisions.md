@@ -17,6 +17,7 @@ Nothing here blocks starting the platform foundation. Each item blocks the integ
 | 9 | ~~Is Baileys accepted as a time-boxed risk, on which number, with what migration path?~~ **Resolved 2026-08-10 — see "Resolved decisions" below.** | Messaging work |
 | 10 | Which flight-data source for schedule changes, terminal, baggage and actual times — or start with Sabre queues? Commercial quotations required. | Phase 4 automation |
 | 11 | Access to the SOPs for declined offers, hotel booking, and temporary return-segment procedures, which were unavailable during the blueprint review. | Phases 5–6 |
+| 15 | WhatsApp group policy: which roles may create groups, the approved naming template, default staff participants, required greeting, and when a group should be closed or archived. The current safe launch default permits Travel Agents and System Administrators only. | Configurable WhatsApp Setup |
 
 ## Needed from engineering
 

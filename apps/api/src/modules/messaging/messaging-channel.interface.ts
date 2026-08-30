@@ -13,6 +13,12 @@ export type ConversationName = {
   displayName: string;
 };
 
+export type CreatedGroup = {
+  jid: string;
+  name: string;
+  reusedExisting: boolean;
+};
+
 export type StatusHandler = (
   status: ConnectionStatus,
   qr: string | null,
@@ -37,6 +43,7 @@ export interface MessagingChannel {
   onMessage(handler: MessageHandler): void;
   onNameChange(handler: NameHandler): void;
   sendMessage(jid: string, text: string): Promise<void>;
+  createGroup(name: string, participantPhoneNumbers: string[]): Promise<CreatedGroup>;
 }
 
 export const MESSAGING_CHANNEL = "MESSAGING_CHANNEL";
