@@ -1,18 +1,16 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, Outlet, createFileRoute, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState, type FormEvent } from "react";
-import type { PassportStatus } from "@yb-travel/shared";
+import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import type { PassportStatus, TravellerRelationship } from "@yb-travel/shared";
 import { AppHeader } from "../components/AppShell/AppHeader";
-import { PrimaryButton, SecondaryButton } from "../components/AppShell/buttons";
 import { clientsApi, travellersApi } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
 
-export const Route = createFileRoute("/travellers")({
-  component: TravellersPage,
-});
+export const Route = createFileRoute("/travellers")({ component: TravellersPage });
 
-const statusColour = (s: PassportStatus) =>
-  s === "missing" ? "text-yb-red" : s === "expiring_soon" ? "text-yb-amber" : "text-yb-ink2";
+type TravellerTab = "identity" | "documents" | "accounts" | "preferences";
+type TravellerView = "all" | "missing" | "expiring" | "minors" | "mine";
+type LinkDraft = { clientId: string; relationship: TravellerRelationship | "" };
 
 const PASSPORT_STATUS_LABELS: Record<PassportStatus, string> = {
   on_file: "On file",
@@ -20,286 +18,272 @@ const PASSPORT_STATUS_LABELS: Record<PassportStatus, string> = {
   expiring_soon: "Expiring soon",
 };
 
-type LinkDraft = { clientId: string; relationship: string };
+const RELATIONSHIP_LABELS: Record<TravellerRelationship, string> = {
+  self: "Self / account holder",
+  spouse_partner: "Spouse or partner",
+  child: "Child",
+  parent_guardian: "Parent or guardian",
+  sibling: "Sibling",
+  other_relative: "Other relative",
+  employee: "Employee",
+  employer: "Employer",
+  colleague: "Colleague",
+  friend: "Friend",
+  guest: "Guest",
+  group_member: "Group member",
+  other: "Other",
+};
+
+const COUNTRIES = ["United States", "Israel", "Ethiopia", "Canada", "United Kingdom"];
+const controlClass = "h-[28px] w-full border border-[#8d968e] bg-white px-[7px] text-[13px] text-[#1c1f1b] outline-none focus:border-[#1a6b46] focus:ring-1 focus:ring-[#1a6b46]";
+
+function ageFromDob(dob: string | null) {
+  if (!dob) return null;
+  const birth = new Date(`${dob.slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(birth.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  if (today.getMonth() < birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) age -= 1;
+  return age;
+}
+
+function dateLabel(value: string | null) {
+  if (!value) return "—";
+  const parsed = new Date(`${value.slice(0, 10)}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString("en-US");
+}
+
+function expiresWithinSixMonths(value: string | null) {
+  if (!value) return false;
+  const expiry = new Date(`${value.slice(0, 10)}T00:00:00`);
+  const limit = new Date();
+  limit.setMonth(limit.getMonth() + 6);
+  return expiry <= limit;
+}
+
+function Field({ label, required, children }: { label: string; required?: boolean; children: ReactNode }) {
+  return (
+    <div
+      className="mb-[12px] grid items-start gap-x-[12px]"
+      style={{ gridTemplateColumns: "112px minmax(0, 1fr)" }}
+    >
+      <label className="pt-[6px] text-right text-[12px] text-[#3c443d]">
+        {required && <span className="mr-[3px] font-bold text-[#a8341f]">*</span>}{label}
+      </label>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+function SectionTitle({ children, action }: { children: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="yb-traveller-section-title mb-[12px] flex items-center border-b pb-[5px]">
+      <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">{children}</div>
+      <div className="flex-1" />{action}
+    </div>
+  );
+}
 
 function TravellersPage() {
+  const params = useParams({ strict: false }) as { travellerId?: string };
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const travellersQuery = useQuery({ queryKey: ["travellers"], queryFn: travellersApi.list });
   const clientsQuery = useQuery({ queryKey: ["clients"], queryFn: clientsApi.list });
-
   const [query, setQuery] = useState("");
-  const [missingOnly, setMissingOnly] = useState(false);
-  const [hoverRow, setHoverRow] = useState<number | null>(null);
-
-  const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState("");
+  const [view, setView] = useState<TravellerView>("all");
+  const [showForm, setShowForm] = useState(true);
+  const [activeTab, setActiveTab] = useState<TravellerTab>("identity");
+  const [keepOpenAfterCreate, setKeepOpenAfterCreate] = useState(false);
+  const [title, setTitle] = useState("");
+  const [suffix, setSuffix] = useState("");
+  const [givenName, setGivenName] = useState("");
+  const [middleName, setMiddleName] = useState("");
+  const [familyName, setFamilyName] = useState("");
+  const [preferredName, setPreferredName] = useState("");
   const [dob, setDob] = useState("");
+  const [gender, setGender] = useState("");
+  const [nationality, setNationality] = useState("");
+  const [countryOfResidence, setCountryOfResidence] = useState("United States");
+  const [mobile, setMobile] = useState("");
+  const [email, setEmail] = useState("");
+  const [emergencyContact, setEmergencyContact] = useState("");
+  const [emergencyPhone, setEmergencyPhone] = useState("");
   const [passportStatus, setPassportStatus] = useState<PassportStatus>("missing");
+  const [passportNumber, setPassportNumber] = useState("");
+  const [passportIssuingCountry, setPassportIssuingCountry] = useState("");
+  const [passportExpiresOn, setPassportExpiresOn] = useState("");
   const [links, setLinks] = useState<LinkDraft[]>([{ clientId: "", relationship: "" }]);
   const [error, setError] = useState<string | null>(null);
+
+  const resetForm = () => {
+    setTitle(""); setSuffix(""); setGivenName(""); setMiddleName(""); setFamilyName(""); setPreferredName("");
+    setDob(""); setGender(""); setNationality(""); setCountryOfResidence("United States");
+    setMobile(""); setEmail(""); setEmergencyContact(""); setEmergencyPhone("");
+    setPassportStatus("missing"); setPassportNumber(""); setPassportIssuingCountry(""); setPassportExpiresOn("");
+    setLinks([{ clientId: "", relationship: "" }]); setActiveTab("identity"); setError(null);
+  };
 
   const createMutation = useMutation({
     mutationFn: travellersApi.create,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["travellers"] });
-      setShowForm(false);
-      setName("");
-      setDob("");
-      setPassportStatus("missing");
-      setLinks([{ clientId: "", relationship: "" }]);
-      setError(null);
+      const remainOpen = keepOpenAfterCreate;
+      resetForm(); setShowForm(remainOpen); setKeepOpenAfterCreate(false);
     },
-    onError: (err: unknown) => setError(err instanceof Error ? err.message : "Failed to create traveller"),
+    onError: (err: unknown) => {
+      setKeepOpenAfterCreate(false);
+      setError(err instanceof Error ? err.message : "Failed to create traveller");
+    },
   });
 
   const allTravellers = travellersQuery.data ?? [];
-
-  const travellers = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return allTravellers
-      .filter((t) => (missingOnly ? t.passportStatus === "missing" : true))
-      .filter((t) =>
-        q
-          ? [t.name, ...t.clients.map((c) => c.clientName)].join(" ").toLowerCase().includes(q)
-          : true,
-      );
-  }, [allTravellers, query, missingOnly]);
-
   const missingCount = allTravellers.filter((t) => t.passportStatus === "missing").length;
+  const expiringCount = allTravellers.filter((t) => t.passportStatus === "expiring_soon" || expiresWithinSixMonths(t.passportExpiresOn)).length;
+  const minorCount = allTravellers.filter((t) => { const age = ageFromDob(t.dob); return age !== null && age < 18; }).length;
+  const filteredTravellers = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return allTravellers.filter((t) => {
+      const age = ageFromDob(t.dob);
+      const matchesView = view === "all" || view === "mine" ||
+        (view === "missing" && t.passportStatus === "missing") ||
+        (view === "expiring" && (t.passportStatus === "expiring_soon" || expiresWithinSixMonths(t.passportExpiresOn))) ||
+        (view === "minors" && age !== null && age < 18);
+      const searchable = [t.name, t.nationality ?? "", ...t.clients.map((c) => c.clientName)].join(" ").toLowerCase();
+      return matchesView && (!q || searchable.includes(q));
+    });
+  }, [allTravellers, query, view]);
+
+  const legalNameReady = Boolean(givenName.trim() && familyName.trim());
+  const canCreate = legalNameReady && Boolean(dob);
+  const linked = links.some((link) => Boolean(link.clientId));
+  const passportReady = passportStatus === "on_file" && Boolean(passportNumber && passportIssuingCountry && passportExpiresOn);
+  const completeness = Math.round(([legalNameReady, Boolean(dob), passportReady, linked, false].filter(Boolean).length / 5) * 100);
+  const ticketName = `${familyName.trim() || "SURNAME"}/${givenName.trim() || "GIVENNAME"}${middleName.trim() ? ` ${middleName.trim()}` : ""}`.toUpperCase();
 
   function updateLink(index: number, patch: Partial<LinkDraft>) {
-    setLinks((prev) => prev.map((l, i) => (i === index ? { ...l, ...patch } : l)));
+    setLinks((current) => current.map((link, i) => i === index ? { ...link, ...patch } : link));
   }
 
-  function handleSubmit(e: FormEvent) {
+  function submit(e: FormEvent) {
     e.preventDefault();
+    if (!canCreate) { setActiveTab("identity"); setError("Given name, family name and date of birth are required"); return; }
+    if (links.some((link) => link.clientId && !link.relationship)) { setActiveTab("accounts"); setError("Select the traveller's relationship to every linked client account"); return; }
+    setError(null);
     createMutation.mutate({
-      name,
-      dob: dob || null,
+      name: [givenName.trim(), middleName.trim(), familyName.trim(), suffix].filter(Boolean).join(" "),
+      dob,
+      title: title ? (title as "mr" | "mrs" | "ms" | "miss" | "master" | "dr") : null,
+      gender: gender ? (gender as "female" | "male" | "unspecified") : null,
+      nationality: nationality || null,
       passportStatus,
-      links: links
-        .filter((l) => l.clientId)
-        .map((l) => ({ clientId: Number(l.clientId), relationship: l.relationship || null })),
+      passportNumber: passportNumber || null,
+      passportIssuingCountry: passportIssuingCountry || null,
+      passportExpiresOn: passportExpiresOn || null,
+      links: links.filter((link) => link.clientId).map((link) => ({ clientId: Number(link.clientId), relationship: link.relationship || null })),
     });
   }
 
+  const tabs: Array<{ id: TravellerTab; label: string; flagged: boolean }> = [
+    { id: "identity", label: "Identity", flagged: !canCreate },
+    { id: "documents", label: "Documents", flagged: !passportReady },
+    { id: "accounts", label: "Client Accounts", flagged: !linked },
+    { id: "preferences", label: "Preferences", flagged: false },
+  ];
+
+  if (params.travellerId) return <Outlet />;
+
   return (
-    <div className="min-w-[1280px] bg-white text-yb-ink">
-      <AppHeader tabs={NAV_TABS} query={query} onQueryChange={setQuery} />
-
-      {/* Page header — no filter strip: this is a flat reference list
-          (P1-04), not a workflow queue, so a search + single toggle
-          replaces the saved-views pattern used on Requests/Clients. */}
-      <div className="flex items-center gap-[14px] border-b border-yb-line-head px-[22px] pt-[16px] pb-[14px]">
-        <div className="flex h-[30px] w-[30px] items-center justify-center rounded-yb-tile bg-yb-green">
-          <div className="h-[13px] w-[13px] rounded-[1px] border-2 border-yb-gold" />
-        </div>
-        <div>
-          <div className="text-[10.5px] font-bold tracking-[1.4px] text-yb-muted4">TRAVELLERS</div>
-          <div className="flex items-baseline gap-[10px]">
-            <h1 className="mt-[1px] text-[26px] font-black tracking-[-0.2px]">All Travellers</h1>
-            <span className="text-[13px] text-yb-muted3">
-              {allTravellers.length} total · {missingCount} missing passport info
-            </span>
-          </div>
-        </div>
-        <div className="flex-1" />
-        <div className="flex items-center gap-[10px]">
-          <button
-            type="button"
-            onClick={() => setMissingOnly((v) => !v)}
-            className={`h-[34px] rounded-yb border px-[16px] text-[14px] ${
-              missingOnly
-                ? "border-yb-red bg-[#fdf1f0] font-bold text-yb-red"
-                : "border-yb-line-btn bg-white text-yb-ink2"
-            }`}
-          >
-            Missing Passport Info
+    <div className="yb-reference-scale min-h-screen min-w-[1180px] bg-[#eef0ea] font-[Helvetica,Arial,sans-serif] leading-[1.2] text-[#1c1f1b]">
+      <AppHeader tabs={NAV_TABS} query={query} onQueryChange={setQuery} compact />
+      <nav className="flex h-[31px] items-center gap-[22px] border-b border-[#d3d8d0] bg-white px-[16px] text-[12px]">
+        {([[
+          "all", "All Travellers", allTravellers.length,
+        ], ["missing", "Missing Documents", missingCount], ["expiring", "Expiring < 6 Months", expiringCount], ["minors", "Minors", minorCount], ["mine", "My Travellers", null]] as Array<[TravellerView, string, number | null]>).map(([id, label, count]) => (
+          <button key={id} type="button" onClick={() => setView(id)} className={`flex h-[31px] items-center gap-[6px] border-b-2 bg-transparent ${view === id ? "border-[#0d3b26] font-bold text-[#0d3b26]" : "border-transparent text-[#0b5c3b]"}`}>
+            {label}{count !== null && <span className={id === "missing" ? "font-bold text-[#a8341f]" : "font-normal text-[#7a8580]"}>{count}</span>}
           </button>
-          <PrimaryButton onClick={() => setShowForm((s) => !s)}>
-            {showForm ? "Cancel" : "+ New Traveller"}
-          </PrimaryButton>
-          <SecondaryButton>Export ▾</SecondaryButton>
-        </div>
-      </div>
+        ))}
+      </nav>
 
-      {showForm && (
-        <form
-          onSubmit={handleSubmit}
-          className="mx-[22px] mt-4 mb-[18px] rounded-yb border border-yb-line bg-yb-panel-head p-[16px]"
-        >
-          <div className="flex gap-[14px]">
-            <label className="flex-1 text-[13px] text-yb-muted">
-              Name
-              <input
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="mt-1 h-[32px] w-full rounded-yb border border-yb-line-btn bg-white px-[9px] text-[14px] text-yb-ink"
-              />
-            </label>
-            <label className="flex-1 text-[13px] text-yb-muted">
-              Date of birth
-              <input
-                type="date"
-                value={dob}
-                onChange={(e) => setDob(e.target.value)}
-                className="mt-1 h-[32px] w-full rounded-yb border border-yb-line-btn bg-white px-[9px] text-[14px] text-yb-ink"
-              />
-            </label>
-            <label className="flex-1 text-[13px] text-yb-muted">
-              Passport status
-              <select
-                value={passportStatus}
-                onChange={(e) => setPassportStatus(e.target.value as PassportStatus)}
-                className="mt-1 h-[32px] w-full rounded-yb border border-yb-line-btn bg-white px-[9px] text-[14px] text-yb-ink"
-              >
-                {(Object.keys(PASSPORT_STATUS_LABELS) as PassportStatus[]).map((s) => (
-                  <option key={s} value={s}>
-                    {PASSPORT_STATUS_LABELS[s]}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div className="mt-[14px]">
-            <div className="mb-[6px] text-[13px] text-yb-muted">
-              Linked client accounts — the same traveller can be linked to more than one
-            </div>
-            {links.map((link, i) => (
-              <div key={i} className="mb-[8px] flex items-center gap-[10px]">
-                <select
-                  value={link.clientId}
-                  onChange={(e) => updateLink(i, { clientId: e.target.value })}
-                  className="h-[32px] w-[220px] rounded-yb border border-yb-line-btn bg-white px-[9px] text-[14px] text-yb-ink"
-                >
-                  <option value="">Select a client…</option>
-                  {(clientsQuery.data ?? []).map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  placeholder="Relationship (e.g. spouse, employee) — optional"
-                  value={link.relationship}
-                  onChange={(e) => updateLink(i, { relationship: e.target.value })}
-                  className="h-[32px] w-[280px] rounded-yb border border-yb-line-btn bg-white px-[9px] text-[14px] text-yb-ink"
-                />
-                {links.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setLinks((prev) => prev.filter((_, idx) => idx !== i))}
-                    className="text-[13px] text-yb-red underline"
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setLinks((prev) => [...prev, { clientId: "", relationship: "" }])}
-              className="text-[13px] text-yb-green underline"
-            >
-              + Add another client
-            </button>
-          </div>
-
-          {error && <div className="mt-[10px] text-[13px] text-yb-red">{error}</div>}
-
-          <div className="mt-[14px] flex gap-[10px]">
-            <PrimaryButton type="submit" disabled={createMutation.isPending}>
-              {createMutation.isPending ? "Creating…" : "Create Traveller"}
-            </PrimaryButton>
-            <SecondaryButton type="button" onClick={() => setShowForm(false)}>
-              Cancel
-            </SecondaryButton>
-          </div>
-        </form>
-      )}
-
-      {/* Panel */}
-      <div className="mx-[22px] mt-4 mb-[26px] rounded-yb border border-yb-line bg-white">
-        <div className="flex items-center border-b border-yb-line bg-yb-panel-head px-[14px] py-2">
-          <div className="text-[11.5px] font-bold tracking-[1.1px] text-yb-panel-head-text">
-            TRAVELLERS{missingOnly ? " — MISSING PASSPORT INFO" : ""}
-          </div>
+      <main className="px-[16px] pt-[14px] pb-[40px]">
+        <header className="mb-[12px] flex items-end gap-[12px]">
+          <div className="h-[22px] w-[22px] border border-[#b0b8ae] bg-white p-[5px]" aria-hidden="true"><div className="h-full w-full bg-[#d9a01e]" /></div>
+          <div><div className="text-[10px] uppercase tracking-[0.14em] text-[#6c766f]">Travellers</div><div className="flex items-baseline gap-[8px]"><h1 className="text-[24px] font-bold tracking-[-0.01em]">All Travellers</h1><span className="text-[12px] text-[#6c766f]">{allTravellers.length} total · {missingCount} missing passport info</span></div></div>
           <div className="flex-1" />
-          <div className="text-[11.5px] text-yb-muted3">{travellers.length} items</div>
-        </div>
+          {!showForm && <button type="button" onClick={() => setShowForm(true)} className="border border-[#0a4a2e] bg-[#0d5c39] px-[14px] py-[6px] text-[12px] font-bold text-white">+ New Traveller</button>}
+          <button type="button" className="border border-[#b0b8ae] bg-white px-[14px] py-[6px] text-[12px]">Import from CSV</button>
+          <button type="button" className="border border-[#b0b8ae] bg-white px-[14px] py-[6px] text-[12px]">Export ▾</button>
+        </header>
 
-        <table className="w-full table-fixed border-collapse text-[14px]">
-          <thead>
-            <tr className="bg-yb-table-head">
-              <th className="w-[170px] border-b border-yb-line py-[7px] pr-2 pl-[14px] text-left font-bold text-yb-muted">
-                Name
-              </th>
-              <th className="w-[130px] border-b border-yb-line px-2 py-[7px] text-left font-bold text-yb-muted">
-                Date of Birth
-              </th>
-              <th className="w-[150px] border-b border-yb-line px-2 py-[7px] text-left font-bold text-yb-muted">
-                Passport Status
-              </th>
-              <th className="border-b border-yb-line px-2 py-[7px] text-left font-bold text-yb-muted">
-                Client Accounts
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {travellers.map((t) => {
-              const hovered = hoverRow === t.id;
-              return (
-                <tr
-                  key={t.id}
-                  onMouseEnter={() => setHoverRow(t.id)}
-                  onMouseLeave={() => setHoverRow(null)}
-                  className={`cursor-pointer ${hovered ? "bg-yb-row-hover" : "bg-white"}`}
-                >
-                  <td className="border-b border-yb-line-row py-[11px] pr-2 pl-[14px] font-bold">{t.name}</td>
-                  <td className="border-b border-yb-line-row px-2 py-[11px] text-yb-ink2">
-                    {t.dob ? new Date(t.dob).toLocaleDateString() : "Missing"}
-                  </td>
-                  <td
-                    className={`border-b border-yb-line-row px-2 py-[11px] ${statusColour(t.passportStatus)} ${
-                      t.passportStatus !== "on_file" ? "font-bold" : ""
-                    }`}
-                  >
-                    {PASSPORT_STATUS_LABELS[t.passportStatus]}
-                  </td>
-                  <td className="border-b border-yb-line-row px-2 py-[11px] text-yb-ink2">
-                    {t.clients.length === 0
-                      ? "—"
-                      : t.clients.map((c, i) => (
-                          <span key={c.clientId}>
-                            {i > 0 && ", "}
-                            <a href="#" onClick={(e) => e.preventDefault()} className="text-yb-green underline">
-                              {c.clientName}
-                            </a>
-                            {c.relationship && (
-                              <span className="text-yb-muted3"> ({c.relationship})</span>
-                            )}
-                          </span>
-                        ))}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        {showForm && <form onSubmit={submit} className="yb-traveller-card mb-[14px] border border-t-[3px] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+          <div className="yb-traveller-card-header flex items-center gap-[10px] border-b px-[16px] py-[10px]"><div className="text-[14px] font-bold">New traveller</div><div className="text-[11px] text-[#6c766f]">Legal name and date of birth are required — documents and preferences can follow.</div><div className="flex-1" /><button type="button" aria-label="Close new traveller form" onClick={() => setShowForm(false)} className="bg-transparent px-[2px] text-[18px] text-[#6c766f]">×</button></div>
+          <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(230px, 310px)" }}>
+            <div className="min-w-0 px-[20px] pt-[14px] pb-[18px]">
+              <div className="yb-traveller-tabs mb-[14px] flex border-b">{tabs.map((tab) => <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-[6px] border-b-2 px-[14px] py-[7px] text-[12px] ${activeTab === tab.id ? "font-bold text-[#0d5c39]" : "border-transparent text-[#0b5c3b]"}`} style={activeTab === tab.id ? { borderBottomColor: "#0d5c39" } : undefined}>{tab.label}{tab.flagged && <span style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: "#d9a01e", display: "inline-block", flex: "0 0 auto" }} aria-label="Missing information" />}</button>)}</div>
 
-        {travellersQuery.isLoading && (
-          <div className="px-[14px] py-[28px] text-center text-[14px] text-yb-muted3">
-            Loading travellers…
+              {activeTab === "identity" && <div>
+                <SectionTitle>Name as shown on passport</SectionTitle>
+                <div className="grid grid-cols-3 gap-x-[30px]">
+                  <Field label="Title"><select value={title} onChange={(e) => setTitle(e.target.value)} className={controlClass}><option value="">Select…</option><option value="mr">Mr</option><option value="mrs">Mrs</option><option value="ms">Ms</option><option value="miss">Miss</option><option value="master">Master</option><option value="dr">Dr</option></select></Field>
+                  <Field label="Suffix"><select value={suffix} onChange={(e) => setSuffix(e.target.value)} className={controlClass}><option value="">None</option><option>Jr</option><option>Sr</option><option>II</option><option>III</option></select></Field>
+                  <Field label="Given name" required><input value={givenName} onChange={(e) => setGivenName(e.target.value)} placeholder="Ariel" className={controlClass} /><div className="mt-[3px] text-[11px] text-[#7a8580]">Exactly as printed — no nicknames.</div></Field>
+                  <Field label="Middle name"><input value={middleName} onChange={(e) => setMiddleName(e.target.value)} placeholder="Optional" className={controlClass} /><div className="mt-[3px] text-[11px] text-[#7a8580]">Required by some carriers on US routes.</div></Field>
+                  <Field label="Family name" required><input value={familyName} onChange={(e) => setFamilyName(e.target.value)} placeholder="Rothstein" className={controlClass} /></Field>
+                  <Field label="Preferred name"><input value={preferredName} onChange={(e) => setPreferredName(e.target.value)} placeholder="What the desk calls them" className={controlClass} /><div className="mt-[3px] text-[11px] text-[#7a8580]">Used in messages, never on tickets.</div></Field>
+                </div>
+                <SectionTitle>Identity</SectionTitle>
+                <div className="grid grid-cols-3 gap-x-[30px]">
+                  <Field label="Date of birth" required><input type="date" value={dob} onChange={(e) => setDob(e.target.value)} className={controlClass} /><div className="mt-[3px] text-[11px] text-[#7a8580]">Drives infant, child and adult fare rules.</div></Field>
+                  <Field label="Gender"><select value={gender} onChange={(e) => setGender(e.target.value)} className={controlClass}><option value="">Select…</option><option value="male">Male</option><option value="female">Female</option><option value="unspecified">Unspecified (X)</option></select><div className="mt-[3px] text-[11px] text-[#7a8580]">As it appears on the travel document.</div></Field>
+                  <Field label="Nationality"><select value={nationality} onChange={(e) => setNationality(e.target.value)} className={controlClass}><option value="">Select…</option>{COUNTRIES.map((country) => <option key={country}>{country}</option>)}</select></Field>
+                  <Field label="Country of residence"><select value={countryOfResidence} onChange={(e) => setCountryOfResidence(e.target.value)} className={controlClass}>{COUNTRIES.map((country) => <option key={country}>{country}</option>)}<option>Other…</option></select></Field>
+                </div>
+                <SectionTitle>Contact</SectionTitle>
+                <div className="grid grid-cols-3 gap-x-[30px]">
+                  <Field label="Mobile"><input value={mobile} onChange={(e) => setMobile(e.target.value)} placeholder="+1 718 555 0123" className={controlClass} /><div className="mt-[3px] text-[11px] text-[#7a8580]">Matches this person to WhatsApp threads.</div></Field>
+                  <Field label="Email"><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" className={controlClass} /><div className="mt-[3px] text-[11px] text-[#7a8580]">Where airline confirmations are sent.</div></Field>
+                  <Field label="Emergency contact"><input value={emergencyContact} onChange={(e) => setEmergencyContact(e.target.value)} placeholder="Name" className={controlClass} /></Field>
+                  <Field label="Emergency phone"><input value={emergencyPhone} onChange={(e) => setEmergencyPhone(e.target.value)} placeholder="+1 718 555 0199" className={controlClass} /></Field>
+                </div>
+              </div>}
+
+              {activeTab === "documents" && <div>
+                <SectionTitle action={<button type="button" className="border border-[#b0b8ae] bg-white px-[10px] py-[3px] text-[11px]">Upload scan</button>}>Primary passport</SectionTitle>
+                <Field label="Status"><select value={passportStatus} onChange={(e) => setPassportStatus(e.target.value as PassportStatus)} className={`${controlClass} max-w-[340px]`}>{(Object.keys(PASSPORT_STATUS_LABELS) as PassportStatus[]).map((status) => <option key={status} value={status}>{PASSPORT_STATUS_LABELS[status]}</option>)}</select><div className="mt-[3px] text-[11px] text-[#7a8580]">Traveller appears in Missing Documents until a passport is added.</div></Field>
+                <div className="grid grid-cols-2 gap-x-[30px]"><Field label="Passport number"><input value={passportNumber} onChange={(e) => setPassportNumber(e.target.value)} placeholder="A12345678" className={controlClass} /></Field><Field label="Issuing country"><select value={passportIssuingCountry} onChange={(e) => setPassportIssuingCountry(e.target.value)} className={controlClass}><option value="">Select…</option>{COUNTRIES.map((country) => <option key={country}>{country}</option>)}</select></Field><Field label="Expiration date"><input type="date" value={passportExpiresOn} onChange={(e) => setPassportExpiresOn(e.target.value)} className={controlClass} /><div className="mt-[3px] text-[11px] text-[#8a6d10]">Many destinations need 6 months&apos; validity.</div></Field></div>
+                <SectionTitle>Secure traveller programs</SectionTitle><div className="grid grid-cols-2 gap-x-[30px]"><Field label="Known Traveler No."><input placeholder="TSA PreCheck / Global Entry" className={controlClass} /></Field><Field label="Redress number"><input placeholder="Optional" className={controlClass} /></Field></div>
+              </div>}
+
+              {activeTab === "accounts" && <div>
+                <SectionTitle action={<button type="button" onClick={() => setLinks((current) => [...current, { clientId: "", relationship: "" }])} className="text-[11px] text-[#0b5c3b] underline">+ Add client account</button>}>Client accounts</SectionTitle>
+                <div className="border border-[#ccd3cb]"><div className="grid gap-[8px] border-b border-[#dfe4dc] bg-[#f2f5f0] px-[10px] py-[5px] text-[10px] font-bold tracking-[0.1em] text-[#5c665e]" style={{ gridTemplateColumns: "minmax(0, 1.3fr) minmax(0, 1fr) 34px" }}><div>CLIENT</div><div>RELATIONSHIP</div><div /></div>{links.map((link, index) => <div key={index} className="grid items-center gap-[8px] border-b border-[#edf0ea] px-[10px] py-[8px]" style={{ gridTemplateColumns: "minmax(0, 1.3fr) minmax(0, 1fr) 34px" }}><select value={link.clientId} onChange={(e) => updateLink(index, { clientId: e.target.value })} className={controlClass}><option value="">Select client…</option>{(clientsQuery.data ?? []).filter((client) => !client.isDemo).map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><select value={link.relationship} onChange={(e) => updateLink(index, { relationship: e.target.value as TravellerRelationship | "" })} className={controlClass}><option value="">Relationship…</option>{(Object.keys(RELATIONSHIP_LABELS) as TravellerRelationship[]).map((relationship) => <option key={relationship} value={relationship}>{RELATIONSHIP_LABELS[relationship]}</option>)}</select><button type="button" aria-label="Remove client account" onClick={() => setLinks((current) => current.length === 1 ? [{ clientId: "", relationship: "" }] : current.filter((_, i) => i !== index))} className="h-[28px] border border-[#b0b8ae] bg-white text-[#6c766f]">×</button></div>)}</div>
+                <div className="mt-[6px] text-[11px] text-[#7a8580]">One person can belong to several client accounts.</div>
+              </div>}
+
+              {activeTab === "preferences" && <div>
+                <SectionTitle>Travel preferences</SectionTitle><div className="grid grid-cols-2 gap-x-[30px]"><Field label="Seat"><select className={controlClass}><option>No preference</option><option>Aisle</option><option>Window</option></select></Field><Field label="Meal"><select className={controlClass}><option>No special meal</option><option>Kosher (KSML)</option><option>Vegetarian (VGML)</option></select></Field><Field label="Special assistance"><select className={controlClass}><option>None</option><option>Wheelchair to gate (WCHR)</option><option>Unaccompanied minor</option></select></Field><Field label="Language"><select className={controlClass}><option>English</option><option>Hebrew</option><option>Yiddish</option></select></Field></div>
+                <SectionTitle action={<button type="button" className="text-[11px] text-[#0b5c3b] underline">+ Add program</button>}>Loyalty programs</SectionTitle><div className="border border-dashed border-[#b8c0b6] bg-[#f7f9f6] p-[12px] text-[12px] text-[#7a8580]">No frequent flyer numbers on file. Add them so miles credit automatically on every booking.</div>
+              </div>}
+              {error && <div role="alert" className="mt-[10px] text-[12px] font-bold text-[#a8341f]">{error}</div>}
+            </div>
+
+            <aside className="yb-traveller-aside border-l bg-[#f9faf8] px-[16px] py-[14px]">
+              <div className="mb-[8px] text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Ticket name preview</div><div className="border border-[#dfe4dc] bg-white p-[10px]"><div className="text-[13px] font-bold uppercase tracking-[0.03em]">{ticketName}</div><div className="mt-[3px] text-[11px] text-[#7a8580]">How the name prints on the e-ticket.</div></div>
+              <div className="my-[12px] border-t border-[#e4e8e2]" /><div className="mb-[7px] text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Profile completeness</div><div className="mb-[6px] h-[6px] bg-[#e4e8e2]"><div className="h-[6px] bg-[#0d5c39]" style={{ width: `${completeness}%` }} /></div><div className="mb-[9px] text-[11.5px] text-[#59635b]">{completeness}% complete — a traveller can be saved at any stage.</div>
+              {([['Legal name', legalNameReady], ['Date of birth', Boolean(dob)], ['Passport on file', passportReady], ['Linked to a client', linked], ['Loyalty numbers', false]] as Array<[string, boolean]>).map(([label, ready]) => <div key={label} className={`mb-[5px] flex gap-[7px] text-[11.5px] ${ready ? "text-[#0d5c39]" : "text-[#9aa39b]"}`}><span className="font-bold">{ready ? "✓" : "○"}</span><span>{label}</span></div>)}
+              <div className="my-[12px] border-t border-[#e4e8e2]" /><div className="text-[11.5px] leading-[1.6] text-[#7a8580]">Duplicate names with the same date of birth are flagged after saving, never blocked.</div>
+            </aside>
           </div>
-        )}
-        {travellers.length === 0 && !travellersQuery.isLoading && (
-          <div className="px-[14px] py-[28px] text-center text-[14px] text-yb-muted3">
-            No travellers match &ldquo;{query}&rdquo;.
-          </div>
-        )}
-      </div>
+          <div className="yb-traveller-card-footer flex items-center gap-[10px] border-t bg-[#f2f5f0] px-[16px] py-[10px]"><div className="text-[11px] text-[#7a8580]">Given name, family name and date of birth are required.</div><div className="flex-1" /><button type="button" onClick={() => setShowForm(false)} className="border border-[#8d968e] bg-white px-[16px] py-[6px] text-[12px]">Cancel</button><button type="submit" onClick={() => setKeepOpenAfterCreate(true)} disabled={!canCreate || createMutation.isPending} className="border border-[#8d968e] bg-white px-[16px] py-[6px] text-[12px] disabled:text-[#9aa39b]">Create &amp; New</button><button type="submit" onClick={() => setKeepOpenAfterCreate(false)} disabled={!canCreate || createMutation.isPending} className="border border-[#0a4a2e] bg-[#0d5c39] px-[20px] py-[6px] text-[12px] font-bold text-white disabled:border-[#c8cec6] disabled:bg-[#dfe3dd] disabled:text-[#9aa39b]">{createMutation.isPending ? "Creating…" : "Create Traveller"}</button></div>
+        </form>}
+
+        <section className="yb-traveller-table border bg-white">
+          <div className="flex items-center border-b border-[#d7dcd5] bg-[#eff2ec] px-[12px] py-[6px]"><div className="text-[10px] font-bold tracking-[0.12em] text-[#5c665e]">TRAVELLERS — {view === "all" ? "ALL TRAVELLERS" : view.toUpperCase()}</div><div className="flex-1" /><div className="text-[11px] text-[#6c766f]">{filteredTravellers.length} items</div></div>
+          <div className="flex items-center gap-[10px] border-b border-[#e4e8e2] px-[12px] py-[8px] text-[12px]"><span>View:</span><select value={view} onChange={(e) => setView(e.target.value as TravellerView)} className="h-[24px] border border-[#8d968e] text-[12px]"><option value="all">All Travellers</option><option value="missing">Missing Documents</option><option value="expiring">Expiring soon</option><option value="minors">Minors</option></select><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter by name or passport" className="h-[24px] w-[210px] border border-[#8d968e] px-[6px] text-[12px]" /><button type="button" className="text-[#0b5c3b] underline">Edit</button><button type="button" className="text-[#0b5c3b] underline">Create New View</button></div>
+          <div className="overflow-auto"><table className="w-full min-w-[900px] border-collapse text-[12.5px]"><thead><tr className="bg-[#f7f9f6]">{["Traveller", "Date of Birth", "Age", "Passport", "Expires", "Nationality", "Client Accounts", "Last Trip"].map((heading) => <th key={heading} className={`border-b border-[#cfd6ce] px-[12px] py-[7px] text-left text-[11px] font-bold text-[#3c443d] ${heading === "Last Trip" ? "text-right" : ""}`}>{heading}</th>)}</tr></thead><tbody>{filteredTravellers.map((traveller) => { const age = ageFromDob(traveller.dob); const openTraveller = () => navigate({ to: "/travellers/$travellerId", params: { travellerId: String(traveller.id) } }); return <tr key={traveller.id} role="link" tabIndex={0} onClick={openTraveller} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openTraveller(); } }} className="cursor-pointer hover:bg-[#f7f9f6] focus:bg-[#f7f9f6] focus:outline-none"><td className="border-b border-[#edf0ea] px-[12px] py-[9px]"><Link to="/travellers/$travellerId" params={{ travellerId: String(traveller.id) }} onClick={(event) => event.stopPropagation()} className="font-bold text-[#0b5c3b] underline">{traveller.name}</Link>{traveller.isDemo && <span className="ml-[7px] border border-[#d3b35a] bg-[#fff7d8] px-[5px] py-[1px] text-[9px] font-bold text-[#7b5b00]">DEMO</span>}{age !== null && age < 18 && <span className="ml-[7px] border border-[#d7dcd5] bg-[#eef2ea] px-[6px] py-[1px] text-[10px] font-bold">MINOR</span>}</td><td className="border-b border-[#edf0ea] px-[12px] py-[9px]">{traveller.dob ? dateLabel(traveller.dob) : "Missing"}</td><td className="border-b border-[#edf0ea] px-[12px] py-[9px]">{age ?? "—"}</td><td className="border-b border-[#edf0ea] px-[12px] py-[9px]"><span className={`font-bold ${traveller.passportStatus === "missing" ? "text-[#a8341f]" : traveller.passportStatus === "expiring_soon" ? "text-[#8a6d10]" : "text-[#0d5c39]"}`}>● {PASSPORT_STATUS_LABELS[traveller.passportStatus]}</span></td><td className="border-b border-[#edf0ea] px-[12px] py-[9px] text-[#6c766f]">{dateLabel(traveller.passportExpiresOn)}</td><td className="border-b border-[#edf0ea] px-[12px] py-[9px]">{traveller.nationality ?? "—"}</td><td className="border-b border-[#edf0ea] px-[12px] py-[9px]">{traveller.clients.length ? traveller.clients.map((client, index) => <span key={client.clientId}>{index > 0 && ", "}<Link to="/clients/$clientId" params={{ clientId: String(client.clientId) }} onClick={(event) => event.stopPropagation()} className="text-[#0b5c3b] underline">{client.clientName}</Link>{client.relationship && ` (${RELATIONSHIP_LABELS[client.relationship as TravellerRelationship] ?? client.relationship})`}</span>) : "—"}</td><td className="border-b border-[#edf0ea] px-[12px] py-[9px] text-right text-[#6c766f]">—</td></tr>; })}</tbody></table>{travellersQuery.isLoading && <div className="p-[24px] text-center text-[12px] text-[#6c766f]">Loading travellers…</div>}{!travellersQuery.isLoading && filteredTravellers.length === 0 && <div className="p-[24px] text-center text-[12px] text-[#6c766f]">No travellers match this view.</div>}</div>
+        </section>
+      </main>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { HOUR, MIN } from "../lib/time";
 
 export type RequestRow = {
   id: string;
+  requestId?: number;
   client: string;
   trip: string;
   stage: string;

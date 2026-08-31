@@ -272,11 +272,18 @@ function OnboardingSettingsPage() {
                 Stable code
                 <input
                   required
+                  readOnly={editingStageId !== null}
+                  aria-readonly={editingStageId !== null}
                   value={stageForm.code}
                   onChange={(event) => setStageValue("code", event.target.value.toLowerCase().replace(/\s+/g, "_"))}
                   pattern="[a-z0-9]+(?:_[a-z0-9]+)*"
-                  className={inputClass}
+                  className={`${inputClass} ${editingStageId !== null ? "cursor-not-allowed bg-yb-table-head text-yb-muted3" : ""}`}
                 />
+                {editingStageId !== null && (
+                  <span className="mt-[4px] block text-[11.5px] text-yb-muted3">
+                    Technical identifier used by records and automations. It cannot be changed after creation.
+                  </span>
+                )}
               </label>
               <label className="text-[13px] text-yb-muted">
                 Order
@@ -382,7 +389,23 @@ function OnboardingSettingsPage() {
             <div className="grid grid-cols-[180px_1fr_1fr_100px] gap-[12px]">
               <label className="text-[13px] text-yb-muted">Record type<select value={fieldForm.entityType} onChange={(event) => setFieldValue("entityType", event.target.value as RequirementEntity)} className={inputClass}>{(Object.keys(ENTITY_LABELS) as RequirementEntity[]).map((entity) => <option key={entity} value={entity}>{ENTITY_LABELS[entity]}</option>)}</select></label>
               <label className="text-[13px] text-yb-muted">Display label<input required value={fieldForm.label} onChange={(event) => setFieldValue("label", event.target.value)} className={inputClass} /></label>
-              <label className="text-[13px] text-yb-muted">Stable field key<input required value={fieldForm.fieldKey} onChange={(event) => setFieldValue("fieldKey", event.target.value.toLowerCase().replace(/\s+/g, "_"))} pattern="[a-z0-9]+(?:_[a-z0-9]+)*" className={inputClass} /></label>
+              <label className="text-[13px] text-yb-muted">
+                Stable field key
+                <input
+                  required
+                  readOnly={editingFieldId !== null}
+                  aria-readonly={editingFieldId !== null}
+                  value={fieldForm.fieldKey}
+                  onChange={(event) => setFieldValue("fieldKey", event.target.value.toLowerCase().replace(/\s+/g, "_"))}
+                  pattern="[a-z0-9]+(?:_[a-z0-9]+)*"
+                  className={`${inputClass} ${editingFieldId !== null ? "cursor-not-allowed bg-yb-table-head text-yb-muted3" : ""}`}
+                />
+                {editingFieldId !== null && (
+                  <span className="mt-[4px] block text-[11.5px] text-yb-muted3">
+                    Technical identifier. It cannot be changed after creation.
+                  </span>
+                )}
+              </label>
               <label className="text-[13px] text-yb-muted">Order<input type="number" min="0" required value={fieldForm.position} onChange={(event) => setFieldValue("position", Number(event.target.value))} className={inputClass} /></label>
             </div>
             <div className="mt-[12px] flex flex-wrap gap-[9px]">

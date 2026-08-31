@@ -1,5 +1,6 @@
 import * as fs from "fs/promises";
 import * as path from "path";
+import { createHash } from "node:crypto";
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import type { WASocket } from "@whiskeysockets/baileys";
 import pino from "pino";
@@ -10,6 +11,7 @@ import type {
   MessageHandler,
   MessagingChannel,
   NameHandler,
+  ResolvedDirectRecipient,
   StatusHandler,
 } from "./messaging-channel.interface";
 
@@ -49,6 +51,7 @@ export class BaileysConnector implements MessagingChannel, OnModuleInit {
   private status: ConnectionStatus = "disconnected";
   private qr: string | null = null;
   private phoneNumber: string | null = null;
+  private connecting = false;
   private readonly statusHandlers: StatusHandler[] = [];
   private readonly messageHandlers: MessageHandler[] = [];
   private readonly nameHandlers: NameHandler[] = [];
@@ -56,10 +59,28 @@ export class BaileysConnector implements MessagingChannel, OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     try {
-      await this.connect();
+      await this.reconnect();
     } catch (err) {
       this.logger.error(`Baileys failed to initialize: ${(err as Error).message}`);
     }
+  }
+
+  async reconnect(): Promise<void> {
+    if (this.connecting || this.status === "connected" || this.status === "qr_pending") return;
+    this.connecting = true;
+    try {
+      await this.connect();
+    } finally {
+      this.connecting = false;
+    }
+  }
+
+  private async preserveInvalidAuthState(authDir: string): Promise<void> {
+    const backupRoot = path.join(path.dirname(authDir), ".baileys-auth-backups");
+    const backupName = new Date().toISOString().replace(/[:.]/g, "-");
+    await fs.mkdir(backupRoot, { recursive: true });
+    await fs.rename(authDir, path.join(backupRoot, backupName));
+    await fs.mkdir(authDir, { recursive: true });
   }
 
   private async connect(): Promise<void> {
@@ -105,25 +126,24 @@ export class BaileysConnector implements MessagingChannel, OnModuleInit {
       if (connection === "close") {
         const errorWithStatus = lastDisconnect?.error as { output?: { statusCode?: number } } | undefined;
         const loggedOut = errorWithStatus?.output?.statusCode === DisconnectReason.loggedOut;
+        this.socket = null;
         this.status = "disconnected";
         this.qr = null;
         this.emitStatus();
         if (!loggedOut) {
-          this.connect().catch((err) =>
+          this.reconnect().catch((err) =>
             this.logger.error(`Baileys reconnect failed: ${(err as Error).message}`),
           );
         } else {
-          // A real logout (device removed on the phone, or WhatsApp itself
-          // ended the session) — the old credentials are dead and resuming
-          // with them would just fail again. Clear them and reconnect so
-          // Baileys generates a brand-new QR instead of leaving the Inbox
-          // screen stuck on "disconnected" with no way to recover without
-          // someone manually clearing files on the server.
-          this.logger.warn("WhatsApp logged out — clearing stale session and requesting a new QR.");
-          fs.rm(authDir, { recursive: true, force: true })
-            .then(() => this.connect())
+          // A real logout means WhatsApp will no longer accept the current
+          // credentials. Preserve them as a timestamped backup rather than
+          // deleting them, then start a clean pairing flow. The new socket
+          // emits a QR that the authenticated Inbox can display.
+          this.logger.warn("WhatsApp logged out — preserving the old session and requesting a new QR.");
+          this.preserveInvalidAuthState(authDir)
+            .then(() => this.reconnect())
             .catch((err) =>
-              this.logger.error(`Failed to reset session after logout: ${(err as Error).message}`),
+              this.logger.error(`Failed to preserve and replace logged-out session: ${(err as Error).message}`),
             );
         }
       }
@@ -172,6 +192,9 @@ export class BaileysConnector implements MessagingChannel, OnModuleInit {
         if (!isGroup && msg.pushName) this.rememberName(jid, msg.pushName);
         this.messageHandlers.forEach((handler) =>
           handler({
+            providerMessageId: msg.key.id ?? createHash("sha256")
+              .update(`${jid}|${String(msg.messageTimestamp ?? "")}|${body}`)
+              .digest("hex"),
             jid,
             phoneNumber,
             displayName: this.knownNames.get(jid) ?? (!isGroup ? msg.pushName?.trim() || null : null),
@@ -219,9 +242,28 @@ export class BaileysConnector implements MessagingChannel, OnModuleInit {
     this.knownNames.forEach((displayName, jid) => handler({ jid, displayName }));
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async resolveDirectRecipient(phoneNumber: string): Promise<ResolvedDirectRecipient | null> {
+    if (!this.socket || this.status !== "connected") {
+      throw new Error("WhatsApp is not connected");
+    }
+
+    const registrations = await this.socket.onWhatsApp(phoneNumber);
+    const registration = registrations?.[0];
+    if (!registration?.exists || !registration.jid) return null;
+
+    return {
+      jid: registration.jid,
+      phoneNumber,
+      displayName: this.knownNames.get(registration.jid) ?? null,
+    };
+  }
+
+  async sendMessage(jid: string, text: string): Promise<{ providerMessageId: string }> {
     if (!this.socket) throw new Error("WhatsApp connection not initialized");
-    await this.socket.sendMessage(jid, { text });
+    const result = await this.socket.sendMessage(jid, { text });
+    const providerMessageId = result?.key?.id;
+    if (!providerMessageId) throw new Error("WhatsApp did not return a provider message ID");
+    return { providerMessageId };
   }
 
   async createGroup(name: string, participantPhoneNumbers: string[]): Promise<CreatedGroup> {

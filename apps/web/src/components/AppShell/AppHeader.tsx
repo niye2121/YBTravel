@@ -6,13 +6,14 @@ type AppHeaderProps = {
   tabs: NavTab[];
   query?: string;
   onQueryChange?: (value: string) => void;
+  compact?: boolean;
 };
 
-export function AppHeader({ tabs, query, onQueryChange }: AppHeaderProps) {
+export function AppHeader({ tabs, query, onQueryChange, compact = false }: AppHeaderProps) {
   return (
     <>
-      <TopUtilityBar query={query} onQueryChange={onQueryChange} />
-      <PrimaryNav tabs={tabs} />
+      <TopUtilityBar query={query} onQueryChange={onQueryChange} compact={compact} />
+      <PrimaryNav tabs={tabs} compact={compact} />
     </>
   );
 }

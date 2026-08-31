@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Req,
   UseGuards,
@@ -15,6 +16,7 @@ import { AuthGuard } from "../auth/auth.guard";
 import type { AuthenticatedRequest } from "../auth/auth.guard";
 import { RoleGuard } from "../auth/role.guard";
 import { MessagingService } from "./messaging.service";
+import { DraftIntakesService } from "./draft-intakes.service";
 import {
   WhatsAppGroupsService,
   type WhatsAppGroupOptions,
@@ -24,6 +26,28 @@ import {
 const participantSchema = z.object({
   id: z.number().int().positive(),
   phoneNumber: z.string().trim().min(8).max(30),
+});
+
+const startConversationSchema = z.object({
+  phoneNumber: z.string().trim().min(8).max(30),
+});
+
+const sendMessageSchema = z.object({
+  text: z.string().trim().min(1, "Reply message is required").max(2000),
+  travelRequestId: z.number().int().positive().optional(),
+});
+
+const updateDraftIntakeSchema = z.object({
+  requestTypeId: z.number().int().positive(),
+  urgencyLevelId: z.number().int().positive(),
+  summary: z.string().trim().min(3).max(200),
+  passengerCount: z.number().int().min(1).max(100).nullable(),
+  origin: z.string().trim().max(100).nullable(),
+  destination: z.string().trim().max(100).nullable(),
+  departureDateText: z.string().trim().max(100).nullable(),
+  returnDateText: z.string().trim().max(100).nullable(),
+  missingInformation: z.array(z.string().trim().min(1).max(200)).max(20),
+  suggestedReply: z.string().trim().max(2000).nullable(),
 });
 
 const createGroupSchema = z
@@ -58,6 +82,7 @@ export class MessagingController {
   constructor(
     private readonly messaging: MessagingService,
     private readonly groups: WhatsAppGroupsService,
+    private readonly draftIntakes: DraftIntakesService,
   ) {}
 
   @Get("status")
@@ -65,14 +90,101 @@ export class MessagingController {
     return this.messaging.getStatus();
   }
 
+  @Post("reconnect")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("system_administrator")
+  reconnect() {
+    return this.messaging.reconnect();
+  }
+
   @Get("conversations")
   listConversations() {
     return this.messaging.listConversations();
   }
 
+  @Post("conversations")
+  startConversation(@Body() body: unknown): Promise<{ id: number }> {
+    try {
+      const input = startConversationSchema.parse(body);
+      return this.messaging.startDirectConversation(input.phoneNumber);
+    } catch (error) {
+      if (error instanceof ZodError) throw new BadRequestException(error.flatten().fieldErrors);
+      throw error;
+    }
+  }
+
   @Get("conversations/:id/messages")
   listMessages(@Param("id", ParseIntPipe) id: number) {
     return this.messaging.listMessages(id);
+  }
+
+  @Get("delivery-failures")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("system_administrator")
+  listDeliveryFailures() {
+    return this.messaging.listDeliveryFailures();
+  }
+
+  @Post("messages/:id/retry")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  async retryFailedMessage(
+    @Param("id", ParseIntPipe) id: number,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.messaging.retryFailedMessage(id, request.user.id);
+    return { ok: true };
+  }
+
+  @Get("conversations/:id/draft-intakes")
+  listDraftIntakes(@Param("id", ParseIntPipe) id: number) {
+    return this.draftIntakes.list(id);
+  }
+
+  @Post("conversations/:id/draft-intakes/analyze-latest")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  analyzeLatestDraft(
+    @Param("id", ParseIntPipe) id: number,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.draftIntakes.analyzeLatest(id, request.user.id);
+  }
+
+  @Patch("draft-intakes/:id")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  updateDraftIntake(
+    @Param("id", ParseIntPipe) id: number,
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ) {
+    try {
+      return this.draftIntakes.update(id, updateDraftIntakeSchema.parse(body), request.user.id);
+    } catch (error) {
+      if (error instanceof ZodError) throw new BadRequestException(error.flatten().fieldErrors);
+      throw error;
+    }
+  }
+
+  @Post("draft-intakes/:id/reject")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  rejectDraftIntake(
+    @Param("id", ParseIntPipe) id: number,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.draftIntakes.reject(id, request.user.id);
+  }
+
+  @Post("draft-intakes/:id/create-request")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  createRequestFromDraft(
+    @Param("id", ParseIntPipe) id: number,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.draftIntakes.createRequest(id, request.user.id);
   }
 
   @Get("groups/options")
@@ -101,8 +213,20 @@ export class MessagingController {
   }
 
   @Post("conversations/:id/messages")
-  async sendMessage(@Param("id", ParseIntPipe) id: number, @Body("text") text: string) {
-    await this.messaging.sendReply(id, text);
-    return { ok: true };
+  @UseGuards(RoleGuard)
+  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  async sendMessage(
+    @Param("id", ParseIntPipe) id: number,
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ) {
+    try {
+      const input = sendMessageSchema.parse(body);
+      await this.messaging.sendReply(id, input.text, request.user.id, input.travelRequestId);
+      return { ok: true };
+    } catch (error) {
+      if (error instanceof ZodError) throw new BadRequestException(error.flatten().fieldErrors);
+      throw error;
+    }
   }
 }

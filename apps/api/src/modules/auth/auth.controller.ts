@@ -10,6 +10,7 @@ import {
 } from "@nestjs/common";
 import { z, ZodError } from "zod";
 import type { LoginResponse, User } from "@yb-travel/shared";
+import type { Request } from "express";
 import { AuthService } from "./auth.service";
 import { AuthGuard, type AuthenticatedRequest } from "./auth.guard";
 
@@ -31,7 +32,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post("login")
-  async login(@Body() body: unknown): Promise<LoginResponse> {
+  async login(@Req() request: Request, @Body() body: unknown): Promise<LoginResponse> {
     let credentials;
     try {
       credentials = loginSchema.parse(body);
@@ -41,7 +42,7 @@ export class AuthController {
     }
     const { email, password } = credentials;
 
-    const user = await this.authService.validateCredentials(email, password);
+    const user = await this.authService.validateCredentials(email, password, request.ip ?? request.socket.remoteAddress ?? "unknown");
     if (!user) {
       throw new UnauthorizedException("Invalid email or password");
     }

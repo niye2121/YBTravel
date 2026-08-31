@@ -28,7 +28,7 @@ export type WhatsAppGroupOptions = {
     tripSummary: string;
   }>;
   travellers: Array<{ id: number; name: string; clientIds: number[] }>;
-  staff: Array<{ id: number; name: string; roles: string[] }>;
+  staff: Array<{ id: number; name: string; roles: string[]; phoneNumber: string | null }>;
 };
 
 export type WhatsAppGroupRecord = {
@@ -143,15 +143,18 @@ export class WhatsAppGroupsService {
 
   async getOptions(): Promise<WhatsAppGroupOptions> {
     const [clients, requests, travellers, staff] = await Promise.all([
-      this.pool.query<{ id: number; name: string }>("SELECT id, name FROM clients ORDER BY name"),
+      this.pool.query<{ id: number; name: string }>("SELECT id, name FROM clients WHERE is_demo = false ORDER BY name"),
       this.pool.query<{
         id: number;
         request_number: string;
         client_id: number;
         trip_summary: string;
       }>(
-        `SELECT id, request_number, client_id, trip_summary
-         FROM travel_requests ORDER BY created_at DESC, id DESC`,
+        `SELECT r.id, r.request_number, r.client_id, r.trip_summary
+         FROM travel_requests r
+         JOIN clients c ON c.id = r.client_id
+         WHERE c.is_demo = false
+         ORDER BY r.created_at DESC, r.id DESC`,
       ),
       this.pool.query<{ id: number; name: string; client_ids: number[] }>(
         `SELECT t.id, t.name,
@@ -159,10 +162,11 @@ export class WhatsAppGroupsService {
                   FILTER (WHERE ta.client_id IS NOT NULL), '{}') AS client_ids
          FROM travellers t
          LEFT JOIN traveller_accounts ta ON ta.traveller_id = t.id
+         WHERE t.is_demo = false
          GROUP BY t.id ORDER BY t.name`,
       ),
-      this.pool.query<{ id: number; name: string; roles: string[] }>(
-        "SELECT id, name, roles FROM users ORDER BY name",
+      this.pool.query<{ id: number; name: string; roles: string[]; phone_number: string | null }>(
+        "SELECT id, name, roles, phone_number FROM users WHERE active = true ORDER BY name",
       ),
     ]);
     return {
@@ -178,7 +182,12 @@ export class WhatsAppGroupsService {
         name: row.name,
         clientIds: row.client_ids,
       })),
-      staff: staff.rows,
+      staff: staff.rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        roles: row.roles,
+        phoneNumber: row.phone_number,
+      })),
     };
   }
 
@@ -219,13 +228,15 @@ export class WhatsAppGroupsService {
           : client.query<{ id: number; name: string }>(
               `SELECT t.id, t.name FROM travellers t
                JOIN traveller_accounts ta ON ta.traveller_id = t.id
-               WHERE ta.client_id = $1 AND t.id = ANY($2::int[])`,
+               JOIN clients c ON c.id = ta.client_id
+               WHERE ta.client_id = $1 AND t.id = ANY($2::int[])
+                 AND t.is_demo = false AND c.is_demo = false`,
               [input.clientId, travellerIds],
             ),
         staffIds.length === 0
-          ? Promise.resolve({ rows: [] as Array<{ id: number; name: string }> })
-          : client.query<{ id: number; name: string }>(
-              "SELECT id, name FROM users WHERE id = ANY($1::int[])",
+          ? Promise.resolve({ rows: [] as Array<{ id: number; name: string; phone_number: string | null }> })
+          : client.query<{ id: number; name: string; phone_number: string | null }>(
+              "SELECT id, name, phone_number FROM users WHERE id = ANY($1::int[]) AND active = true",
               [staffIds],
             ),
       ]);
@@ -235,9 +246,13 @@ export class WhatsAppGroupsService {
       if (staffRows.rows.length !== staffIds.length) {
         throw new BadRequestException("One or more selected staff participants no longer exist");
       }
+      if (staffRows.rows.some((row) => !row.phone_number)) {
+        throw new BadRequestException("Every selected staff participant must have a registered WhatsApp phone number");
+      }
 
       const travellerNames = new Map(travellerRows.rows.map((row) => [row.id, row.name]));
       const staffNames = new Map(staffRows.rows.map((row) => [row.id, row.name]));
+      const staffPhoneNumbers = new Map(staffRows.rows.map((row) => [row.id, row.phone_number as string]));
       participants = [
         ...input.travellers.map((item) => ({
           type: "traveller" as const,
@@ -249,7 +264,7 @@ export class WhatsAppGroupsService {
           type: "staff" as const,
           entityId: item.id,
           displayName: staffNames.get(item.id) as string,
-          phoneNumber: normalizePhone(item.phoneNumber),
+          phoneNumber: normalizePhone(staffPhoneNumbers.get(item.id) as string),
         })),
       ];
       if (participants.length === 0) {

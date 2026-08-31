@@ -7,7 +7,14 @@
     "build": "nest build",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
-    "db:migrate": "node scripts/migrate.js"
+    "test:messaging": "npm run build && node scripts/test-start-conversation.js",
+    "test:assignment": "npm run build && node scripts/test-request-assignment.js",
+    "test:security": "npm run build && node scripts/test-security.js",
+    "auth:reset-local-password": "node scripts/reset-local-password.js",
+    "db:migrate": "node scripts/migrate.js",
+    "db:backup": "node scripts/backup.js",
+    "db:verify-backup": "node scripts/verify-backup.js",
+    "db:restore": "node scripts/restore.js"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",

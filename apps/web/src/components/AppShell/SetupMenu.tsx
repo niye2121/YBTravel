@@ -12,9 +12,11 @@ const SETUP_ITEMS = [
   { label: "Users & Roles", to: "/users" as const },
   { label: "Booking Fees", to: "/booking-fees" as const },
   { label: "Onboarding & Required Info", to: "/onboarding-settings" as const },
+  { label: "Request Workflow", to: "/request-workflow-settings" as const },
+  { label: "AI Provider", to: "/ai-provider-settings" as const },
 ];
 
-export function SetupMenu() {
+export function SetupMenu({ compact = false }: { compact?: boolean }) {
   const { isAdmin } = useAuth();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -37,7 +39,7 @@ export function SetupMenu() {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="text-[13px] text-yb-nav-text underline hover:text-white"
+        className={`${compact ? "text-[11px]" : "text-[13px]"} text-yb-nav-text underline hover:text-white`}
       >
         Setup
       </button>

@@ -1,6 +1,7 @@
 export type ConnectionStatus = "qr_pending" | "connected" | "disconnected";
 
 export type InboundMessage = {
+  providerMessageId: string;
   jid: string;
   phoneNumber: string;
   displayName: string | null;
@@ -17,6 +18,12 @@ export type CreatedGroup = {
   jid: string;
   name: string;
   reusedExisting: boolean;
+};
+
+export type ResolvedDirectRecipient = {
+  jid: string;
+  phoneNumber: string;
+  displayName: string | null;
 };
 
 export type StatusHandler = (
@@ -39,10 +46,12 @@ export interface MessagingChannel {
   getStatus(): ConnectionStatus;
   getPhoneNumber(): string | null;
   getQrCode(): string | null;
+  reconnect(): Promise<void>;
   onStatusChange(handler: StatusHandler): void;
   onMessage(handler: MessageHandler): void;
   onNameChange(handler: NameHandler): void;
-  sendMessage(jid: string, text: string): Promise<void>;
+  resolveDirectRecipient(phoneNumber: string): Promise<ResolvedDirectRecipient | null>;
+  sendMessage(jid: string, text: string): Promise<{ providerMessageId: string }>;
   createGroup(name: string, participantPhoneNumbers: string[]): Promise<CreatedGroup>;
 }
 

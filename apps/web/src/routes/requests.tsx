@@ -1,9 +1,12 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { Link, Outlet, createFileRoute, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppHeader } from "../components/AppShell/AppHeader";
 import { FilterStrip } from "../components/AppShell/FilterStrip";
 import { PrimaryButton, SecondaryButton } from "../components/AppShell/buttons";
-import { COLS, FILTERS, GROUPS, money } from "../data/requestsData";
+import { COLS, FILTERS, GROUPS, money, type RequestGroup } from "../data/requestsData";
+import { useAuth } from "../lib/AuthContext";
+import { requestsApi, type TravelRequestRecord } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
 import { countdown } from "../lib/time";
 
@@ -18,20 +21,66 @@ const SORTS = [
   "Client, A–Z",
 ] as const;
 type SortOption = (typeof SORTS)[number];
+const ALL_REQUESTS = "All Requests";
+const ASSIGNED_TO_ME = "Assigned to Me";
 
 const selectClass =
   "h-[28px] rounded-yb border border-yb-line-btn bg-white px-[6px] text-[13.5px] font-bold text-yb-ink";
 
+function requestDeadline(request: TravelRequestRecord): string {
+  const dueAt = request.serviceDueAt ?? request.responseDueAt;
+  if (!dueAt) return "Not configured";
+  const date = new Date(dueAt);
+  if (Number.isNaN(date.getTime())) return "Not configured";
+  const label = request.serviceDueAt ? "Service due" : "Response due";
+  return `${label} — ${date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  })}`;
+}
+
+function liveRequestGroup(
+  requests: TravelRequestRecord[],
+  key = "live-requests",
+  title = "LIVE REQUESTS",
+): RequestGroup | null {
+  if (requests.length === 0) return null;
+  return {
+    key,
+    label: `${title} — ${requests.length} ${requests.length === 1 ? "REQUEST" : "REQUESTS"}`,
+    items: requests.map((request) => ({
+      id: request.requestNumber,
+      requestId: request.id,
+      client: request.clientName,
+      trip: request.tripSummary,
+      stage: request.requestStatusName,
+      waitWho: "Us",
+      waitWhat: request.requestTypeName,
+      fareText: "—",
+      deadline: requestDeadline(request),
+      agent: request.assignedUserName ?? "—",
+    })),
+  };
+}
+
 function RequestsPage() {
-  const [filter, setFilter] = useState("Needs Action Today");
-  const [view, setView] = useState("Needs Action Today");
+  const { user } = useAuth();
+  const params = useParams({ strict: false }) as { requestId?: string };
+  const navigate = useNavigate();
+  const [filter, setFilter] = useState(ALL_REQUESTS);
+  const [view, setView] = useState(ALL_REQUESTS);
   const [sort, setSort] = useState<SortOption>("Deadline, ascending");
   const [show, setShow] = useState("50");
   const [query, setQuery] = useState("");
   const [hoverRow, setHoverRow] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
   const [mountedAt] = useState(() => Date.now());
   const [, setTick] = useState(0);
+  const requestsQuery = useQuery({
+    queryKey: ["requests"],
+    queryFn: requestsApi.list,
+  });
 
   useEffect(() => {
     const t = setInterval(() => setTick((n) => n + 1), 1000);
@@ -39,10 +88,33 @@ function RequestsPage() {
   }, []);
 
   const elapsed = Date.now() - mountedAt;
+  const liveRequests = requestsQuery.data ?? [];
+  const assignedToMeRequests = liveRequests.filter((request) => request.assignedUserId === user?.id);
+  const unassignedRequests = liveRequests.filter((request) => request.assignedUserId === null);
+  const workflowFilters: [string, number][] = FILTERS.map(([label, count]) =>
+    label === "Unassigned" ? [label, unassignedRequests.length] : [label, count],
+  );
+  const requestFilters: [string, number][] = [
+    [ALL_REQUESTS, liveRequests.length],
+    [ASSIGNED_TO_ME, assignedToMeRequests.length],
+    ...workflowFilters,
+  ];
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return GROUPS.map((g) => {
+    const liveGroup = liveRequestGroup(liveRequests);
+    const assignedToMeGroup = liveRequestGroup(assignedToMeRequests, "assigned-to-me", "ASSIGNED TO ME");
+    const unassignedGroup = liveRequestGroup(unassignedRequests, "unassigned-live", "UNASSIGNED REQUESTS");
+    const sourceGroups = q
+      ? liveGroup ? [liveGroup, ...GROUPS] : GROUPS
+      : filter === ALL_REQUESTS
+        ? liveGroup ? [liveGroup] : []
+        : filter === ASSIGNED_TO_ME
+          ? assignedToMeGroup ? [assignedToMeGroup] : []
+          : filter === "Unassigned"
+            ? unassignedGroup ? [unassignedGroup] : []
+        : GROUPS;
+    return sourceGroups.map((g) => {
       let items = g.items.map((r, i) => ({
         ...r,
         _k: i,
@@ -50,7 +122,10 @@ function RequestsPage() {
       }));
       if (q) {
         items = items.filter((r) =>
-          [r.id, r.client, r.trip, r.stage, r.waitWhat].join(" ").toLowerCase().includes(q),
+          [r.id, r.client, r.trip, r.stage, r.waitWho, r.waitWhat, r.fareText, r.deadline, r.agent]
+            .join(" ")
+            .toLowerCase()
+            .includes(q),
         );
       }
       if (sort === "Fare, descending") {
@@ -62,20 +137,23 @@ function RequestsPage() {
       }
       return { ...g, items };
     }).filter((g) => g.items.length > 0);
-  }, [query, sort]);
+  }, [assignedToMeRequests, filter, liveRequests, query, sort, unassignedRequests]);
 
   const total = groups.reduce((n, g) => n + g.items.length, 0);
+
+  if (params.requestId) return <Outlet />;
 
   return (
     <div className="min-w-[1280px] bg-white text-yb-ink">
       <AppHeader tabs={NAV_TABS} query={query} onQueryChange={setQuery} />
 
       <FilterStrip
-        filters={FILTERS}
+        filters={requestFilters}
         active={filter}
         onChange={(label) => {
           setFilter(label);
           setView(label);
+          setQuery("");
         }}
       />
 
@@ -88,7 +166,17 @@ function RequestsPage() {
           <div className="text-[10.5px] font-bold tracking-[1.4px] text-yb-muted4">REQUESTS</div>
           <div className="flex items-baseline gap-[10px]">
             <h1 className="mt-[1px] text-[26px] font-black tracking-[-0.2px]">{filter}</h1>
-            <span className="text-[13px] text-yb-muted3">48 open · 9 due today</span>
+            <span className="text-[13px] text-yb-muted3">
+              {requestsQuery.isLoading
+                ? "Loading live requests…"
+                : filter === ALL_REQUESTS
+                  ? `${liveRequests.length} real ${liveRequests.length === 1 ? "request" : "requests"}`
+                  : filter === ASSIGNED_TO_ME
+                    ? `${assignedToMeRequests.length} assigned to you`
+                    : filter === "Unassigned"
+                      ? `${unassignedRequests.length} awaiting assignment`
+                  : "Demonstration workflow view"}
+            </span>
           </div>
         </div>
         <div className="flex-1" />
@@ -118,10 +206,11 @@ function RequestsPage() {
             onChange={(e) => {
               setView(e.target.value);
               setFilter(e.target.value);
+              setQuery("");
             }}
             className={selectClass}
           >
-            {FILTERS.map(([l]) => (
+            {requestFilters.map(([l]) => (
               <option key={l}>{l}</option>
             ))}
           </select>
@@ -133,6 +222,28 @@ function RequestsPage() {
           </a>
 
           <div className="flex-1" />
+
+          <div className="flex h-[28px] w-[280px] items-center border border-yb-line-btn bg-white">
+            <span className="px-[8px] text-[13px] text-yb-muted4" aria-hidden="true">⌕</span>
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search requests"
+              aria-label="Search requests"
+              className="min-w-0 flex-1 bg-transparent pr-[7px] text-[13px] text-yb-ink outline-none placeholder:text-yb-muted4"
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                className="h-full border-l border-yb-line-soft px-[8px] text-[11px] font-bold text-yb-muted3 hover:bg-yb-row-hover"
+                aria-label="Clear request search"
+              >
+                Clear
+              </button>
+            )}
+          </div>
 
           <span className="text-[13px] text-yb-muted">Sort:</span>
           <select
@@ -193,7 +304,6 @@ function RequestsPage() {
 
               {g.items.map((r) => {
                 const hovered = hoverRow === r.id;
-                const isSel = selected === r.id;
                 const deadlineText = r.liveIn
                   ? `${r.deadlinePrefix} ${countdown(r.liveIn - elapsed)}`
                   : r.deadline;
@@ -202,15 +312,21 @@ function RequestsPage() {
                     key={r.id}
                     onMouseEnter={() => setHoverRow(r.id)}
                     onMouseLeave={() => setHoverRow(null)}
-                    onClick={() => setSelected(isSel ? null : r.id)}
-                    className={`cursor-pointer ${
-                      isSel ? "bg-[#eef3ee]" : hovered ? "bg-yb-row-hover" : "bg-white"
-                    }`}
+                    onClick={() => navigate({
+                      to: "/requests/$requestId",
+                      params: { requestId: r.requestId ? String(r.requestId) : r.id },
+                    })}
+                    className={`cursor-pointer ${hovered ? "bg-yb-row-hover" : "bg-white"}`}
                   >
                     <td className="border-b border-yb-line-row py-[11px] pr-2 pl-[14px]">
-                      <a href="#" onClick={(e) => e.preventDefault()} className="text-yb-green underline">
+                      <Link
+                        to="/requests/$requestId"
+                        params={{ requestId: r.requestId ? String(r.requestId) : r.id }}
+                        onClick={(event) => event.stopPropagation()}
+                        className="text-yb-green underline"
+                      >
                         {r.id}
-                      </a>
+                      </Link>
                     </td>
                     <td className="border-b border-yb-line-row px-2 py-[11px] font-bold">{r.client}</td>
                     <td className="border-b border-yb-line-row px-2 py-[11px] text-yb-ink2">{r.trip}</td>
@@ -238,7 +354,9 @@ function RequestsPage() {
 
         {total === 0 && (
           <div className="px-[14px] py-[28px] text-center text-[14px] text-yb-muted3">
-            No requests match &ldquo;{query}&rdquo;.
+            {requestsQuery.isError
+              ? "Live requests could not be loaded. Please retry after checking the API connection."
+              : <>No requests match &ldquo;{query}&rdquo;.</>}
           </div>
         )}
       </div>

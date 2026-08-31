@@ -1,4 +1,10 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import type { Pool } from "pg";
 import { recordAudit } from "../../database/audit";
 import { PG_POOL } from "../../database/database.module";
@@ -216,20 +222,22 @@ export class WorkflowSettingsService {
       const existingResult = await client.query<StageRow>(`${SELECT_STAGES} WHERE id = $1 FOR UPDATE`, [id]);
       const existingRow = existingResult.rows[0];
       if (!existingRow) throw new NotFoundException("Onboarding stage not found");
+      if (input.code !== existingRow.code) {
+        throw new BadRequestException("Stable code cannot be changed after the stage is created");
+      }
       const result = await client.query<StageRow>(
         `UPDATE onboarding_stages
-         SET code = $2, name = $3, description = $4, position = $5,
-             active = $6, completion_stage = $7,
-             blocks_completion_until_reviewed = $8, generates_task = $9,
-             responsible_role = $10, task_priority = $11,
-             expected_duration_minutes = $12, updated_at = now()
+         SET name = $2, description = $3, position = $4,
+             active = $5, completion_stage = $6,
+             blocks_completion_until_reviewed = $7, generates_task = $8,
+             responsible_role = $9, task_priority = $10,
+             expected_duration_minutes = $11, updated_at = now()
          WHERE id = $1
          RETURNING id, code, name, description, position, active, completion_stage,
                    blocks_completion_until_reviewed, generates_task, responsible_role,
                    task_priority, expected_duration_minutes, created_at, updated_at`,
         [
           id,
-          input.code,
           input.name,
           input.description,
           input.position,
@@ -330,17 +338,19 @@ export class WorkflowSettingsService {
       const existingResult = await client.query<FieldRow>(`${SELECT_FIELDS} WHERE id = $1 FOR UPDATE`, [id]);
       const existingRow = existingResult.rows[0];
       if (!existingRow) throw new NotFoundException("Required information field not found");
+      if (input.fieldKey !== existingRow.field_key) {
+        throw new BadRequestException("Stable field key cannot be changed after the rule is created");
+      }
       const result = await client.query<FieldRow>(
         `UPDATE required_information_fields
-         SET entity_type = $2, field_key = $3, label = $4, required = $5,
-             requires_review = $6, position = $7, active = $8, updated_at = now()
+         SET entity_type = $2, label = $3, required = $4,
+             requires_review = $5, position = $6, active = $7, updated_at = now()
          WHERE id = $1
          RETURNING id, entity_type, field_key, label, required, requires_review,
                    position, active, created_at, updated_at`,
         [
           id,
           input.entityType,
-          input.fieldKey,
           input.label,
           input.required,
           input.requiresReview,

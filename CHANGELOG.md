@@ -4,6 +4,274 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-08-31 — Remove Amharic from the US desk
+
+**What changed:** removed Amharic from traveller language preferences and removed both Amharic starter WhatsApp templates. The idempotent migration deletes existing Amharic message templates, and template validation prevents the unsupported language from being added again. English, Hebrew, and Yiddish remain available.
+
+## 2026-08-31 — Security, messaging reliability, and recovery hardening
+
+**Authentication and transport:** added persistent email-plus-IP login throttling with timed lockouts, immediate invalidation of deactivated employees' sessions, restricted CORS, complete API security headers, stronger production secret validation, and grace-key JWT rotation.
+
+**Messaging and sensitive data:** provider message IDs now provide database-enforced inbound deduplication. Outbound messages record every attempt, provider result, failure, retry timing, and ambiguous-delivery state; confirmed failures have an audited manual retry path, while unknown deliveries are protected from unsafe resend. Traveller list responses redact passport details, every detail access is recorded without copying the sensitive values, and administrators can inspect access history.
+
+**Secrets and recovery:** encrypted AI credentials support re-encryption under a new primary key. Added authenticated rotation, encrypted PostgreSQL backup, verification, guarded restore commands, matching PostgreSQL Docker-tool support, and a production operations runbook covering rotation, retention, incident handling, and monthly restore drills.
+
+**Verification:** the idempotent migration applied successfully; API/web/shared typechecks and builds pass; the database-backed security regression suite verifies throttling, deactivation, duplicate prevention, failure tracking, passport redaction/access history, headers, and encrypted-file integrity. An encrypted database backup verified with 275 restore entries and restored successfully into a temporary database containing 30 public tables; the temporary database and test backup were then removed. A live `/health` response confirmed the active API security headers.
+
+## 2026-08-31 — Configurable assignment and fallback routing
+
+**What changed:** added a complete assignment-routing policy with preferred representative, secondary representative, client-continuity, eligible-team, and supervisor-escalation levels. Administrators can choose recommend-only or automatic assignment, lowest-workload or round-robin team selection, eligible and escalation roles, and Normal/High/Urgent fallback timers.
+
+**Staff controls:** the new Assignment & Fallback settings page manages each employee's active state, availability, normal and high-priority capacity, timezone, working hours, working days, and request-type qualifications. Client-specific preferred and secondary representatives continue to be configured on the client profile.
+
+**Request behavior and audit:** request ownership now has a separate assignment state so assigning a request does not incorrectly change its operational workflow stage. Request details show the current system recommendation, routing level, explanation, next fallback time, and assignment history. Confirmed assignments, reassignments, automatic assignments, overrides, and escalations record the actor, selected staff member, explanation, and recommendation snapshot.
+
+**Verification:** the idempotent schema migration applied successfully; API and web typechecks and production builds pass; the rollback-only PostgreSQL test verified recommendation evaluation, assignment state, unchanged workflow state, and audit history. Chrome verification confirmed the complete settings page and an explainable supervisor escalation on R-10504 when no eligible employee was within configured working hours. No live assignment or settings were changed during verification.
+
+## 2026-08-31 — Notify staff when a request is assigned
+
+**What changed:** every successful request assignment or reassignment now creates a private in-app notification for the newly responsible employee in the same database transaction. The notification identifies the request, client, trip summary, assigning employee, and exact request record. Assigning a request to the same current owner remains a no-op and does not create duplicate alerts.
+
+**Staff experience:** every application header now includes a notification bell with an unread count and a latest-50 notification menu that refreshes automatically. Selecting an assignment notification marks it read and opens the exact request. Staff may also mark all notifications read; read actions are audited and one employee cannot view or modify another employee's notifications.
+
+**Scope:** this is the primary in-app assignment notification only. Timed reminders, acknowledgement deadlines, supervisor escalation, email, and staff WhatsApp delivery remain separate later work.
+
+## 2026-08-31 — Clarify and streamline WhatsApp group creation
+
+**What changed:** the Managed Groups form now automatically selects a client's newest saved request and generates an editable group name. When a client has no saved request, the inline request form opens automatically, preselects the first active request type, and clearly labels its action **Save request & continue**. Saving the request immediately connects it to the group and fills the suggested name without waiting for the options list to refresh.
+
+**Guidance and validation:** the footer now shows a four-part completion checklist for client, request, participants with valid WhatsApp numbers, and group name. It identifies the exact next action instead of leaving Generate Name and Create WhatsApp Group disabled with a generic error. Changing clients clears prior participant selections to prevent accidental carryover.
+
+**Why:** the previous form displayed the saved-request selector and new-request editor at the same time without explaining which one had to be completed, so operators could not tell why group creation remained unavailable.
+
+**Verification:** web typecheck and the Node 24 production build pass, and `git diff --check` is clean. Chrome verification confirmed that Nigist automatically selects R-10504 and generates `Nigist · R-10504`; selecting a client without requests opens the new-request form with the first active type selected. Supplying a selected participant and a valid test-format number enabled the final action and showed the Ready state. The form was then cancelled, and no request or WhatsApp group was created.
+
+## 2026-08-31 — Review and send proposed client replies from requests
+
+**What changed:** real request details now show the saved AI intake proposed reply in a large editable field, together with the linked client WhatsApp number and an explicit **Send to client** action. Requests without a linked Inbox conversation show a clear unavailable state.
+
+**Human approval and audit:** nothing sends automatically. An authorized employee must review or edit the text and deliberately click Send to client. The server validates the staff role, message text, and request-to-conversation relationship before sending, appends the outbound message to the Inbox conversation, and records the actor, request, conversation, provider message ID, and character count in the audit history without duplicating the message body.
+
+**Verification:** API and web typechecks and production builds pass, and `git diff --check` passes. Chrome verification confirmed that R-10504 loads its correct saved proposed reply, linked WhatsApp number, and enabled send action. No live client message was sent during verification.
+
+## 2026-08-31 — Assign real requests to staff
+
+**What changed:** added request ownership fields for the assigned staff member, assignment time, and assigning staff member. Real request profiles now include an Assigned Staff section where System Administrators and Offshore Intake Employees can assign or reassign an eligible Travel Agent or Offshore Intake Employee. An unassigned request can be claimed by a Travel Agent through the same role-aware endpoint.
+
+**Workflow and queues:** assigning a New request moves it to the configurable Assigned status. The Requests screen now shows live **Assigned to Me** and **Unassigned** sections with dynamic counts, and the Agent column displays the current owner. Assignment changes refresh both the detail and queue immediately.
+
+**Permissions and audit:** authorization is re-read from the current database user. Travel Agents may only claim an unassigned request for themselves; administrators and offshore intake staff may assign or reassign. Each real change runs inside a locked database transaction and writes a `travel_request.assigned` or `travel_request.reassigned` audit event with full before/after state. Demonstration requests remain read-only.
+
+**Verification:** the migration applies idempotently, API and web typechecks pass, and both production builds pass. A rollback-only PostgreSQL integration test verified owner persistence, the New → Assigned transition, audit before/after data, and complete restoration of R-10504's original unassigned state. Chrome verification confirmed eligible staff choices, a disabled-until-selected Assign Request action, and live Assigned to Me/Unassigned queue counts. No staff member was selected on the user's behalf.
+
+## 2026-08-31 — Open demonstration request details
+
+**What changed:** request numbers and complete rows in the demonstration workflow views now open read-only detail pages. The detail clearly identifies the record as DEMO and displays its client, trip, stage, assigned agent, waiting-on party, next action, fare, and deadline. Real request rows continue opening their database-backed profiles.
+
+**Why:** demonstration request numbers were underlined and rows appeared interactive, but clicking them only selected a row because no detail route had been connected.
+
+**Verification:** web typecheck and production build pass. Live Chrome verification opened R-10482 at `/requests/R-10482` and confirmed its DEMO label, Kaplan client, JFK–TLV itinerary, workflow, agent, fare, and deadline details.
+
+## 2026-08-31 — Add an All Requests section
+
+**What changed:** added **All Requests** as the first and default Requests section. It displays every real database-backed request in one place and shows a live count in both the section tab and page heading. Selecting the section clears any previous search so the complete list is immediately visible; entering a search from any workflow section still searches real requests globally.
+
+**Why:** staff needed a reliable destination for browsing all operational requests instead of depending on the older demonstration views or knowing a request number in advance.
+
+**Verification:** web typecheck and production build pass. Live Chrome verification confirmed All Requests is the default section, displays both R-10504 and R-10503 with exact links, and clears an existing request search when selected.
+
+## 2026-08-31 — Include live requests in the Requests queue
+
+**What changed:** connected the Requests screen to the real travel-requests API while retaining the existing demonstration queue for reference. Database-backed requests now appear in a clearly labelled Live Requests group, participate in the same request-number/client/summary/status/type/deadline search, and link to their exact request profiles.
+
+**Why:** AI-created requests such as R-10504 existed and opened from the Inbox, but the Requests screen searched only static demonstration rows, incorrectly reporting that the request could not be found.
+
+**Verification:** web typecheck and production build pass. Live Chrome verification searched for `10504`, returned exactly R-10504 in the Live Requests group, and confirmed that its link targets `/requests/5`.
+
+## 2026-08-31 — Show all requests from an Inbox conversation
+
+**What changed:** added a persistent **Requests in this conversation** section to the AI Draft Intake panel. It lists every approved request created from the selected WhatsApp thread with its exact request number, summary, request type, urgency, and creation date; each item opens the matching request profile.
+
+**Workflow behavior:** prior requests remain visible while a newer message is pending review, rejected, or fails analysis. The list is read-only navigation and does not create, update, approve, or send anything.
+
+**Verification:** API and web typechecks pass, the web production build passes, and live Chrome verification shows R-10504 and R-10503 together with their correct `/requests/5` and `/requests/4` links.
+
+## 2026-08-31 — Larger Suggested Reply editor
+
+**What changed:** expanded the AI Draft Intake Suggested Reply field to seven visible lines with improved spacing and vertical resizing, matching the enlarged Missing Information editor.
+
+**Verification:** web typecheck and production build pass. The current draft was approved before the final browser refresh, so the live Inbox correctly showed its created-request state rather than an editable pending draft.
+
+## 2026-08-31 — Larger Missing Information editor
+
+**What changed:** expanded the AI Draft Intake Missing Information field from two lines to seven visible lines, increased its internal spacing and line height, and made it vertically resizable so staff can comfortably review and edit every missing item.
+
+**Verification:** web typecheck and production build pass, and the expanded editor was verified against the current pending AI draft in Chrome.
+
+## 2026-08-31 — Search the Requests queue
+
+**What changed:** added a dedicated search control to the Requests toolbar. It filters the visible queue immediately across request number, client, trip, stage, waiting-on details, fare, deadline, and assigned-agent initials, with a one-click Clear action and matching item count.
+
+**Verification:** web typecheck and production build pass, and the Requests search and clear states were verified in Chrome.
+
+## 2026-08-31 — Wider AI Draft Intake panel
+
+**What changed:** widened the Inbox AI Draft Intake and context sidebar from 300–340px to 390–430px so request summaries, extracted details, review controls, and client context are easier to read while the conversation remains flexible.
+
+**Verification:** web typecheck and production build pass, and the updated three-column Inbox layout was visually checked in Chrome.
+
+## 2026-08-31 — Open AI-created requests from the Inbox
+
+**What changed:** the request number shown after approving an AI Draft Intake now links to the exact persisted travel request instead of the generic Requests queue. Added an authenticated request-detail endpoint and a dedicated request profile showing the request number, client, summary, request type, status, urgency, response/service deadlines, and creation time.
+
+**Verification:** API and web typechecks pass, the production web build includes the new request-detail route, and live Chrome verification opened R-10503 directly from its Inbox confirmation link at `/requests/4` with the correct client and AI-reviewed trip summary.
+
+## 2026-08-31 — AI-assisted WhatsApp Draft Intake
+
+**What changed:** eligible incoming WhatsApp travel messages now run through the configured OpenAI adapter and produce a structured **Draft Intake** beside the Inbox conversation. The draft includes request type, urgency, summary, passenger count, route, travel-date text, missing information, a confidence score, and a suggested reply. Existing conversations also provide an explicit **Analyze latest message** action for review and controlled retries.
+
+**Human approval boundary:** AI output is stored separately from operational travel requests with Pending, Rejected, Approved, and Failed states. Staff may edit or reject the proposal, copy its suggested reply into the unsent composer, or create the official request only after review. The create action requires a linked client and is protected against duplicate requests; no AI-generated message is sent automatically.
+
+**Privacy, history, and verification:** obvious payment-card, security-code, and passport-number patterns are redacted before provider transmission. Provider token/cost usage flows through the existing privacy-safe usage ledger, while draft edits, rejection, approval, and official request creation are audited. The migration applied successfully; API and web typechecks pass, the API production build passes, and the web production build passes under the project-required Node 20.19+ runtime.
+
+## 2026-08-31 — Prevent duplicate clients and preserve WhatsApp linkage
+
+**What changed:** client creation and editing now reject a phone number already assigned to another live client. The check normalizes punctuation and country-code formatting and uses a transaction-scoped database lock, so rapid or concurrent submissions cannot create the same phone twice. The New Client form now displays the WhatsApp/phone field for Household, Company, and Individual clients, and the Clients toolbar includes a dedicated search across names, phone numbers, types, representatives, fee groups, and onboarding stages.
+
+**Inbox linkage:** direct WhatsApp conversations now store an explicit client relationship. Creating a client from **Link to client** passes the conversation identity and creates both records' relationship in the same audited transaction. Once linked, Inbox removes the “isn't linked” warning and displays the client name with a direct profile link. Existing phone-matched conversations are backfilled to the earliest live client.
+
+**Duplicate cleanup and verification:** removed empty duplicate client `#44`, retained original client `#43`, linked conversation `#4` to it, and preserved the removed row in the audit history. Chrome verification confirmed one Nigist result, phone search reducing the list to that one client, visible phone input for new clients, linked Inbox context, and a rejected duplicate create with no new row. Shared/API/web typechecks pass, production builds pass, and WhatsApp reconnected on the project-required modern Node runtime.
+
+## 2026-08-31 — Open existing travellers in form view
+
+**What changed:** every traveller row and traveller-name link now opens a dedicated read-only profile form. The form separates Identity, Documents, Client Accounts, and Preferences into clear tabs, shows profile completeness and record metadata, and provides direct navigation back to the Travellers list. Traveller names shown inside a client profile now open the same detail view.
+
+**Data and behavior:** added an authenticated single-traveller API endpoint and exposed the stored passport number and issuing country alongside the existing identity, passport status/expiry, and linked-client data. Missing or hidden records display a clear not-found state. This change does not introduce editing or alter traveller records.
+
+**Verification:** shared, API, and web TypeScript checks pass, as does the production web build and `git diff --check`. Live Chrome verification covered whole-row navigation, identity and passport fields, linked client accounts and relationships, back navigation, and the not-found state. No application-origin console errors were present; observed warnings came from installed Chrome extensions.
+
+## 2026-08-31 — Edit clients from their profile
+
+**What changed:** added an **Edit Client** action to live client profiles. It opens a prefilled form for the client name, type, WhatsApp number, onboarding stage, preferred and secondary representatives, and booking fee group, with Save Changes and Cancel controls. Successful saves refresh the profile and Clients list immediately.
+
+**Safety and history:** the authenticated API validates active stages and fee groups, normalizes WhatsApp numbers, rejects edits to demo clients, and records the full before/after client state in the audit log within the same database transaction as the update. Demo profiles remain visibly read-only.
+
+**Verification:** shared, API, and web TypeScript checks pass. The edit form was opened and cancelled against an existing client during browser verification so no live client data was changed.
+
+## 2026-08-31 — AI usage and estimated-cost history
+
+**What changed:** expanded **Setup → AI Provider** with an administrator-only usage dashboard covering the latest 100 provider requests over selectable 7-day, 30-day, 90-day, or all-time periods. Summary cards show provider-request count, input and cached-input tokens, output tokens, total tokens, failed calls, and estimated USD spend. Each history row records purpose, model, status/error, token counts, estimated cost, staff member, duration, provider response identifier, and optional related business-record identifiers.
+
+**Cost and privacy boundaries:** every YB Travel OpenAI generation now enters through one backend client that records the usage object returned by the Responses API. The ledger stores no prompts, client messages, or generated reply text. Costs use a versioned price snapshot for GPT-5.6 Luna, Terra, or Sol, account for cached input and the documented long-context multiplier, and remain estimates; the page links to OpenAI Billing because the actual remaining credit balance, taxes, and account-level adjustments are authoritative there. Money is persisted as PostgreSQL `NUMERIC`, not a JavaScript floating-point authority.
+
+**Operational visibility:** connection tests are also recorded as zero-token provider requests, including failures, so administrators can distinguish access checks from paid generations. The SQL migration applied successfully, API/web/shared typechecks pass, production builds pass, and live Chrome verification confirmed the usage totals, period controls, billing link, history headings, privacy explanation, and empty state. A local encryption key is now configured so the OpenAI key can be saved securely; the administrator must enter the project API key once on the page because it was not present in the database during verification.
+
+## 2026-08-31 — Keep client names on one line
+
+**What changed:** widened the Clients table’s Client column from 150px to 250px and grouped each client name with its optional DEMO badge in a non-wrapping row. Phone numbers remain on their own line underneath.
+
+**Why:** longer names such as Bluebird Learning Center and Horizon Consulting LLC were wrapping at the operator’s 75% browser zoom, making the list taller and harder to scan.
+
+## 2026-08-31 — Administrator-controlled demo clients and travellers
+
+**What changed:** added an audited **Show sample clients and travellers** checkbox to the System Administrator Setup overview. The current local system is enabled and now displays 12 read-only demo clients—four Households, four Companies, and four Individuals—with 24 linked travellers covering family, employee, employer, colleague, guest, group-member, and friend relationships. Demo rows use reserved 555-01xx phone numbers and carry visible **DEMO** labels.
+
+**Production safety:** demo records are stored separately with stable demo identifiers and `is_demo` flags. Disabling the checkbox immediately removes them from the Clients and Travellers APIs without deleting or changing live records; enabling it restores the same catalogue without reseeding. Fresh deployments default to demo data disabled. Demo profiles cannot accept new travellers, demo travellers cannot be linked to live records, and demo records are excluded from WhatsApp group workflows.
+
+**Client model and verification:** client type is now persisted for newly created clients and displayed in the client list and profile. Date-only traveller fields are serialized explicitly as `YYYY-MM-DD` so dates do not shift across time zones. The migration applies idempotently; two runs retained exactly 12 demo clients, 24 demo travellers, and 24 links. A rolled-back disabled-state database check returned only the three existing live clients and three live travellers. API and web typechecks/builds pass, and Chrome verification covered the administrator toggle in both directions, client/traveller counts, type and demo labels, linked travellers, read-only controls, and a clean application console.
+
+## 2026-08-31 — Secure OpenAI provider setup
+
+**What changed:** added an administrator-only **Setup → AI Provider** page for connecting YB Travel to an OpenAI project key, selecting GPT-5.6 Luna/Terra/Sol, choosing bounded reasoning and output limits, testing model access, and enabling or disabling AI-assisted intake. GPT-5.6 Luna is the recommended default; the page makes current reference token prices visible while keeping OpenAI billing authoritative.
+
+**Credential safety:** API keys are sent only to the authenticated backend, tested against OpenAI's model endpoint without generating billable response tokens, encrypted with AES-256-GCM before PostgreSQL storage, and represented in API/UI responses only by the last four characters. Saving requires a separately managed `AI_SECRETS_ENCRYPTION_KEY`; every settings update records a sanitized audit event that never includes the secret. Human review and sensitive-data redaction remain mandatory and cannot be disabled from the page.
+
+**Scope boundary:** this connects and configures the provider but does not yet run AI over live WhatsApp messages. The separate intake-adapter, redaction, structured extraction schema, evaluation set, and employee review workflow still need implementation before production client data is processed.
+
+**Verified locally:** API, web, and shared TypeScript checks pass; both production builds succeed with the project-required modern Node runtime; the SQL migration applies cleanly twice; and direct navigation without an authenticated administrator is redirected to sign-in. A live-key test was deliberately not performed because no OpenAI credential was supplied in this task.
+
+## 2026-08-31 — Open client profiles and add linked travellers
+
+**What changed:** client names in the Clients table now open a dedicated client profile instead of acting as inactive links. The profile shows the client's onboarding stage, WhatsApp number, preferred and secondary representatives, fee group, creation date, and every traveller already linked to that client.
+
+**Traveller workflow:** each client profile now includes **+ Add Traveller**. Staff can either create a new traveller and link them to the open client in one step, or select an existing unlinked traveller and add the relationship to the client. Existing links are excluded from the selector to prevent duplicate choices, and no passport details are required during this quick-add flow.
+
+**Verified locally:** the web TypeScript check and production build pass. Chrome verification confirmed that all three existing client names navigate to real profile URLs, the selected client's details and linked-traveller table load, and both new-traveller and existing-traveller forms render correctly. No test traveller was saved during verification.
+
+## 2026-08-31 — Match the approved Add New Client interface
+
+**What changed:** rebuilt the New Client panel to match the supplied interface: compact page chrome at the operator's saved 75% browser zoom, a name-first Client details section, interactive Household/Company/Individual type selector, aligned Assignment & Fees fields, explanatory help text, the “What happens next” sidebar, keyboard guidance, and Cancel / Create & New / Create Client actions. The surrounding Clients header and filter strip now use the same compact proportions as the reference.
+
+**Functional scope preserved:** clients opened from a WhatsApp conversation still carry the prefilled WhatsApp number into the create request even though the reference design does not display that field. Active fee groups and real representatives continue to come from the existing APIs; Create & New now saves and keeps the panel open for another entry, while Escape, Cancel, and close return to the normal Clients URL.
+
+**Why:** the earlier grouped form deliberately omitted the client-type selector, guidance panel, inline help, and Create & New workflow, so it remained visibly and behaviorally different from the approved design.
+
+## 2026-08-30 — Recover WhatsApp locally and harden reconnect/QR states
+
+**What changed:** restored the existing local WhatsApp connection without clearing credentials or requiring another scan. The Inbox now distinguishes an unavailable YB Travel API from a genuine WhatsApp disconnection, offers an API retry when the service cannot be reached, and gives System Administrators a protected **Try connection again** action when WhatsApp itself is disconnected.
+
+**Authentication-state correction:** an expired or origin-specific application token now redirects immediately to the login page with the current route preserved. It is no longer mislabeled as a WhatsApp/API outage while a stale “System Administrator” header remains visible.
+
+**Session and QR safety:** normal restarts always attempt the saved WhatsApp credentials first. If WhatsApp explicitly reports that the linked-device session has been logged out and cannot be resumed, the connector now moves the invalid credential directory into a timestamped backup instead of deleting it, starts a clean pairing session, and publishes the resulting QR code to the authenticated Inbox automatically.
+
+**Why:** a stopped API previously looked exactly like a disconnected WhatsApp account and left the page waiting for a QR that no running connector could generate. The corrected states preserve recoverable sessions, explain infrastructure outages accurately, and still provide a visible recovery path for a genuinely invalid session.
+
+## 2026-08-30 — WhatsApp Inbox and Managed Groups redesign
+
+**What changed:** rebuilt the WhatsApp Inbox around the approved three-column visual direction: a searchable conversation rail, a focused message workspace, and a contextual details panel. The connected-state header, compact WhatsApp sub-navigation, real conversation metadata, selected-thread actions, message bubbles, and composer now use the same warm-grey, green, gold, 2px-radius, no-shadow system as the supplied reference. The Managed Groups screen now uses the matching stepped form, participant panels, live group preview, action footer, and managed-groups table.
+
+**Functional scope preserved:** conversation search and start-by-number, conversation selection, message history, sending, socket updates, connection/QR states, real client/request selection, real participant validation, generated group naming, managed-group creation, role restrictions, and the existing required travel-request relationship are unchanged. Reference-only Email and Assigned-to-me tabs, fabricated unread counts, canned replies, quick actions, client-link claims, passport status, optional unlinked groups, and sample records were deliberately not added because the current product and backend do not support them.
+
+**Verified locally:** the web TypeScript check passes, the production frontend build succeeds with the project-required modern Node runtime, and `git diff --check` passes. Fresh Chrome verification covered connected Inbox and Managed Groups states, conversation filtering, start-field focus, draft-enabled Send, client/request selection, real-request expansion, incomplete-form prevention, and browser console review. No WhatsApp message or group was created during testing. Visual QA against both supplied references is recorded in `design-qa.md` with `final result: passed`.
+
+## 2026-08-30 — Explain role capabilities while creating users
+
+**What changed:** the administrator's **Setup → Users → New User** form now explains each selected Phase 1 role directly beneath the role checkboxes. Offshore Intake Employee, Travel Agent, and System Administrator each show a short purpose plus separate **Can** and **Cannot** lists. Selecting multiple roles displays the corresponding cards together and explains that permitted capabilities combine without removing restrictions or granting ticketing or finance authority.
+
+**Role boundary clarified:** Offshore Intake prepares clients, travellers, onboarding information, replies, and request routing; Travel Agents own assigned travel work, research options, communicate with clients, create holds, and prepare bookings; System Administrators manage technical access and configuration. The display explicitly states that System Administrator is not automatically an operational supervisor and that Travel Agent does not receive operational-escalation authority unless separately designated later.
+
+**Why:** administrators need to understand the operational difference between role checkboxes before creating an account. The descriptions document the approved three-role Phase 1 model and do not expand backend authorization. Web typecheck and the production frontend build pass.
+
+## 2026-08-30 — Grouped client creation form redesign
+
+**What changed:** redesigned the existing New Client form as a bordered, sectioned panel with a green top rule, a compact header, two balanced two-column groups, and a dedicated right-aligned action footer. The layout now separates Client details from Assignment so agents no longer have to scan all four controls across one long row. The reference-only “What happens next” sidebar is not included.
+
+**Functional scope preserved:** the form still contains only Name, required Fee group, Preferred rep, and Secondary rep. The existing configured-fee API, required/optional rules, creation mutation, validation, disabled state, and successful-create reset are unchanged. Reference-only Client type and Create & New behavior were deliberately not added.
+
+**Verified locally:** the web TypeScript check passes, the production web build succeeds with the project-required modern Node runtime, and browser verification confirms the close/cancel/reopen behavior, field requirements, disabled no-fee-group state, absence of the explanatory sidebar, and a clean browser console. The normalized visual comparison is recorded in `design-qa.md` with `final result: passed`.
+
+## 2026-08-30 — Configurable urgency response and service deadlines
+
+**What changed:** expanded **Setup → Request Workflow** with administrator-managed urgency levels. Normal, High, and Urgent are seeded as the approved starting vocabulary. Each level has an immutable stable code plus editable name, description, order, active state, response deadline, and service deadline. Deadlines are stored as positive elapsed minutes, and validation prevents a service target from being earlier than its response target.
+
+**Reporting foundation:** real travel requests now reference an urgency-level record and snapshot `response_due_at` and `service_due_at` when created. First-response and service-completion timestamps are also reserved on the request record. This preserves the original target for historical on-time/late reporting even if an administrator later changes the configuration. Existing requests are backfilled to Normal urgency without inventing a deadline where none has been approved.
+
+**Deliberate policy boundary:** initial response and service targets remain blank so this implementation does not silently establish YB Travel policy. Deadlines currently use elapsed clock time from request receipt. Business-hours calendars, on-hold clock pausing, urgency-detection rules, automated escalation, and the reporting screen remain separate decisions/implementation steps.
+
+**Verified locally:** API and web typechecks and production builds pass; the SQL migration applies cleanly twice; anonymous configuration access returns `401`; administrator access returns Normal, High, and Urgent; and an invalid service-before-response configuration returns `400` without changing the saved record.
+
+---
+
+## 2026-08-30 — Configurable request types and request statuses
+
+**What changed:** added administrator-managed **Setup → Request Workflow** catalogues for the five approved request types and eleven approved request statuses. The defaults include New flight booking, Change existing booking, Cancellation or refund inquiry, General travel inquiry, Other, and the full operational status path from New through Completed/Cancelled, including the explicitly approved **On hold** status. Administrators can change display names, descriptions, order, and active state or add future records without a deployment; stable codes become read-only after creation because request records and integrations use them as identifiers.
+
+**Request integration:** real `travel_requests` now reference request-type and request-status records instead of relying only on a free-text status. Existing request rows are idempotently backfilled to New flight booking / New. The request creation API accepts an active type and always starts at the configured New status; the WhatsApp managed-group workflow now requires staff to choose a request type when creating its linked request record.
+
+**Permissions, audit, and verification:** all authenticated staff can read active values for operational forms, while only System Administrators can see inactive records or create/change configuration. Every catalogue mutation writes transactional before/after audit history. API and web typechecks pass, both production builds succeed with the required modern Node runtime, the SQL migration applies cleanly twice, anonymous configuration access returns `401`, administrator access returns exactly 5 types and 11 statuses, **On hold** is present, and the existing request endpoint remains healthy. Urgency levels and service deadlines remain deliberately unimplemented until their separate business decisions are approved.
+
+---
+
+## 2026-08-30 — Start WhatsApp conversations by phone number
+
+**What changed:** the connected Inbox now has one field for searching existing conversations by contact name or phone number and for starting a new direct WhatsApp conversation. A complete international number enables **Start**; successful lookup creates or reuses the local conversation and opens its thread so the agent can type the first message. No message is sent until the agent explicitly presses **Send**.
+
+**Provider validation:** the provider-neutral `MessagingChannel` interface can now resolve a direct recipient. The Baileys adapter checks the normalized number with WhatsApp before a conversation is stored, retains any known contact display name, rejects unregistered numbers with a readable error, and refuses the workflow while WhatsApp is disconnected. Numbers must include a country code and are normalized to 8–15 digits before provider lookup.
+
+**Security and verification:** the new `POST /messaging/conversations` endpoint remains behind the existing messaging authentication guard. Focused service checks cover normalization, conversation reuse inputs, disconnected-provider handling, and unregistered-number handling. API, web, and shared typechecks pass; API and web production builds succeed with the project-required modern Node runtime; an unauthenticated HTTP request returns `401`; and the connected-state Inbox layout was visually verified in the live local frontend. No real WhatsApp message was sent during testing.
+
+---
+
 ## 2026-08-30 — Create and link WhatsApp groups from YB Travel
 
 **What changed:** added a **WhatsApp Inbox → Manage WhatsApp Groups** workflow. Authorized staff can select a real client and travel request, select only travellers linked to that client, select staff participants, enter each participant's WhatsApp number, and either enter or generate the group name. The generated default combines the client name and unique request number. A minimal real `travel_requests` record and audited request-creation endpoint were added because the existing Requests queue is still frontend mock data and could not provide a valid database relationship.

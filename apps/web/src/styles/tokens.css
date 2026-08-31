@@ -63,3 +63,40 @@ body {
   font-family: var(--font-sans);
   color: var(--color-yb-ink);
 }
+
+/* The supplied desktop reference is authored at 100% browser zoom. Chrome
+   reports a 0.75 dppx viewport when the operator uses the saved 75% zoom;
+   compensate only in that exact condition so the interface preserves the
+   reference's physical density without changing normal 100% rendering. */
+@media (resolution: 0.75dppx) {
+  .yb-reference-scale {
+    width: 100%;
+    min-height: 75vh;
+    zoom: 1.3333333333;
+  }
+}
+
+/* Traveller reference screen: keep the supplied mockup's soft structural
+   borders even when Tailwind's generic border utility resolves to currentColor. */
+.yb-traveller-card {
+  border-color: #c3cbc2;
+  border-top-color: #0d5c39;
+}
+
+.yb-traveller-card-header,
+.yb-traveller-section-title {
+  border-bottom-color: #e4e8e2;
+}
+
+.yb-traveller-tabs,
+.yb-traveller-card-footer {
+  border-color: #d7dcd5;
+}
+
+.yb-traveller-aside {
+  border-left-color: #e4e8e2;
+}
+
+.yb-traveller-table {
+  border-color: #c3cbc2;
+}

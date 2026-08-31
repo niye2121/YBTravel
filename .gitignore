@@ -51,6 +51,7 @@ Thumbs.db
 *.sqlite3
 /uploads/
 /tmp/
+/backups/
 
 # WhatsApp session credentials — never commit, this is a live login session
 .baileys-auth/
@@ -63,3 +64,4 @@ Thumbs.db
 CLAUDE.local.md
 SESSION-LOG.local.md
 SESSION-LOG.local.xlsx
+*.inspect.ndjson

@@ -70,11 +70,35 @@ export class BookingFeesService {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
 
   async list(activeOnly: boolean): Promise<BookingFeeGroup[]> {
+    await this.ensureDemoDefaults();
     const where = activeOnly ? "WHERE active = true" : "";
     const result = await this.pool.query<BookingFeeGroupRow>(
       `${SELECT_FEE_GROUP} ${where} ORDER BY name ASC`,
     );
     return result.rows.map(toBookingFeeGroup);
+  }
+
+  /**
+   * Provide safe, editable starter records for a fresh Phase 1 deployment.
+   * The empty-table guard and unique constraints make this idempotent: it
+   * never replaces administrator changes and never duplicates the records.
+   * Amounts are demonstration values and must be confirmed before live use.
+   */
+  private async ensureDemoDefaults(): Promise<void> {
+    await this.pool.query(`
+      INSERT INTO booking_fee_groups
+        (name, code, amount, currency, calculation_basis,
+         charge_adults, charge_children, charge_infants, active)
+      SELECT seed.*
+      FROM (VALUES
+        ('Standard', 'standard', 50.00::numeric, 'USD', 'per_passenger', true, true, false, true),
+        ('Belev Echad', 'belev_echad', 25.00::numeric, 'USD', 'per_passenger', true, true, false, true),
+        ('Scheiman', 'scheiman', 75.00::numeric, 'USD', 'per_booking', true, true, false, true)
+      ) AS seed(name, code, amount, currency, calculation_basis,
+                charge_adults, charge_children, charge_infants, active)
+      WHERE NOT EXISTS (SELECT 1 FROM booking_fee_groups)
+      ON CONFLICT DO NOTHING
+    `);
   }
 
   async create(input: BookingFeeGroupInput, actorUserId: number): Promise<BookingFeeGroup> {

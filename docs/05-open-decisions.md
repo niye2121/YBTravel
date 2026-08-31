@@ -24,7 +24,7 @@ Nothing here blocks starting the platform foundation. Each item blocks the integ
 | # | Decision | When |
 |---|---|---|
 | 12 | ORM: Drizzle or Prisma — write the ageing reconciliation report and the grouped deadline view in both first | End of technical prototype |
-| 13 | AI provider, behind the provider-neutral intake adapter | After comparative testing on accuracy, price, privacy and structured-output quality |
+| 13 | ~~AI provider, behind the provider-neutral intake adapter~~ **Pilot resolved 2026-08-31 — OpenAI with GPT-5.6 Luna as the initial model; production acceptance still requires anonymized accuracy and privacy evaluation.** | Intake-adapter pilot may proceed |
 | 14 | Routing: TanStack Router or React Router | Start of frontend work |
 
 ## Gaps in the source documents
@@ -40,6 +40,8 @@ Nothing here blocks starting the platform foundation. Each item blocks the integ
 **No environment or release strategy is described.**
 
 ## Resolved decisions
+
+**#13 — AI provider pilot (2026-08-31).** OpenAI was selected for the initial integration, with GPT-5.6 Luna as the cost-efficient default and a stronger model reserved as a possible fallback. The selection authorizes the secure provider configuration and anonymized evaluation work; it does not authorize sending unredacted production client data or bypassing human review. Production acceptance remains contingent on testing representative YB Travel messages for classification, extraction, multilingual quality, privacy, latency, and staff correction rate.
 
 **#9 — Baileys risk acceptance (2026-08-10).** Accepted, with the safeguards in the risk note below applied: a **separate/test number** is paired, not the live business number, and incoming messages surface on a **dedicated Inbox screen** (`apps/web/src/routes/inbox.tsx`) rather than the manual-paste flow. Migration path to the official Cloud API remains the plan once the business number is ready to move — no date set. See `CHANGELOG.md` (2026-08-10) for what was built.
 

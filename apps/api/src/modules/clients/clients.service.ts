@@ -1,11 +1,21 @@
-import { BadRequestException, Inject, Injectable } from "@nestjs/common";
-import type { Pool } from "pg";
-import type { Client, CreateClientInput } from "@yb-travel/shared";
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import type { Pool, PoolClient } from "pg";
+import type { Client, CreateClientInput, UpdateClientInput } from "@yb-travel/shared";
+import { recordAudit } from "../../database/audit";
 import { PG_POOL } from "../../database/database.module";
 
 type ClientRow = {
   id: number;
   name: string;
+  client_type: "household" | "company" | "individual";
+  is_demo: boolean;
+  phone_number: string | null;
   preferred_rep_id: number | null;
   preferred_rep_name: string | null;
   secondary_rep_id: number | null;
@@ -21,6 +31,9 @@ function toClient(row: ClientRow): Client {
   return {
     id: row.id,
     name: row.name,
+    clientType: row.client_type,
+    isDemo: row.is_demo,
+    phoneNumber: row.phone_number,
     preferredRepId: row.preferred_rep_id,
     preferredRepName: row.preferred_rep_name,
     secondaryRepId: row.secondary_rep_id,
@@ -34,7 +47,7 @@ function toClient(row: ClientRow): Client {
 }
 
 const SELECT_CLIENT = `
-  SELECT c.id, c.name, c.stage,
+  SELECT c.id, c.name, c.client_type, c.is_demo, c.phone_number, c.stage,
          COALESCE(os.name, initcap(replace(c.stage, '_', ' '))) AS stage_name,
          c.created_at,
          c.booking_fee_group_id,
@@ -54,6 +67,7 @@ export type ClientTravellerRow = {
   dob: string | null;
   passportStatus: string;
   relationship: string | null;
+  isDemo: boolean;
 };
 
 @Injectable()
@@ -61,7 +75,12 @@ export class ClientsService {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
 
   async list(): Promise<Client[]> {
-    const result = await this.pool.query<ClientRow>(`${SELECT_CLIENT} ORDER BY c.name ASC`);
+    const result = await this.pool.query<ClientRow>(
+      `${SELECT_CLIENT}
+       WHERE NOT c.is_demo
+          OR COALESCE((SELECT demo_data_enabled FROM system_settings WHERE id = 1), false)
+       ORDER BY c.name ASC`,
+    );
     return result.rows.map(toClient);
   }
 
@@ -79,32 +98,158 @@ export class ClientsService {
     return result.rows;
   }
 
-  async create(input: CreateClientInput): Promise<Client> {
-    const feeGroup = await this.pool.query(
-      "SELECT 1 FROM booking_fee_groups WHERE id = $1 AND active = true",
-      [input.bookingFeeGroupId],
-    );
-    if ((feeGroup.rowCount ?? 0) === 0) {
-      throw new BadRequestException("Select an active booking fee group");
+  async create(input: CreateClientInput, actorUserId: number): Promise<Client> {
+    const dbClient = await this.pool.connect();
+    try {
+      await dbClient.query("BEGIN");
+      const phoneNumber = normalizePhoneNumber(input.phoneNumber);
+      await assertUniqueClientPhone(dbClient, phoneNumber);
+
+      const feeGroup = await dbClient.query(
+        "SELECT 1 FROM booking_fee_groups WHERE id = $1 AND active = true",
+        [input.bookingFeeGroupId],
+      );
+      if ((feeGroup.rowCount ?? 0) === 0) {
+        throw new BadRequestException("Select an active booking fee group");
+      }
+
+      let conversationBefore: { id: number; phoneNumber: string; clientId: number | null } | null = null;
+      if (input.conversationId) {
+        const conversationResult = await dbClient.query<{
+          id: number;
+          phone_number: string;
+          client_id: number | null;
+        }>("SELECT id, phone_number, client_id FROM conversations WHERE id = $1 FOR UPDATE", [
+          input.conversationId,
+        ]);
+        const conversation = conversationResult.rows[0];
+        if (!conversation) throw new BadRequestException("WhatsApp conversation not found");
+        if (conversation.client_id !== null) {
+          throw new ConflictException("This WhatsApp conversation is already linked to a client");
+        }
+        if (!phoneNumber || phoneDigits(phoneNumber) !== phoneDigits(conversation.phone_number)) {
+          throw new BadRequestException("Client phone number must match the WhatsApp conversation");
+        }
+        conversationBefore = {
+          id: conversation.id,
+          phoneNumber: conversation.phone_number,
+          clientId: conversation.client_id,
+        };
+      }
+
+      const inserted = await dbClient.query<{ id: number }>(
+        `INSERT INTO clients
+           (name, client_type, phone_number, preferred_rep_id, secondary_rep_id, booking_fee_group_id)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [
+          input.name.trim(),
+          input.clientType,
+          phoneNumber,
+          input.preferredRepId ?? null,
+          input.secondaryRepId ?? null,
+          input.bookingFeeGroupId,
+        ],
+      );
+      const id = inserted.rows[0]?.id;
+      if (!id) throw new Error("Failed to create client");
+
+      if (conversationBefore) {
+        await dbClient.query("UPDATE conversations SET client_id = $2 WHERE id = $1", [
+          conversationBefore.id,
+          id,
+        ]);
+      }
+
+      const result = await dbClient.query<ClientRow>(`${SELECT_CLIENT} WHERE c.id = $1`, [id]);
+      const row = result.rows[0];
+      if (!row) throw new Error("Failed to load created client");
+      const created = toClient(row);
+      await recordAudit(dbClient, actorUserId, "client.created", "client", id, null, created);
+      if (conversationBefore) {
+        await recordAudit(
+          dbClient,
+          actorUserId,
+          "conversation.client_linked",
+          "conversation",
+          conversationBefore.id,
+          conversationBefore,
+          { ...conversationBefore, clientId: id },
+        );
+      }
+      await dbClient.query("COMMIT");
+      return created;
+    } catch (error) {
+      await dbClient.query("ROLLBACK");
+      throw error;
+    } finally {
+      dbClient.release();
     }
+  }
 
-    const inserted = await this.pool.query<{ id: number }>(
-      `INSERT INTO clients (name, preferred_rep_id, secondary_rep_id, booking_fee_group_id)
-       VALUES ($1, $2, $3, $4) RETURNING id`,
-      [
-        input.name,
-        input.preferredRepId ?? null,
-        input.secondaryRepId ?? null,
-        input.bookingFeeGroupId,
-      ],
-    );
-    const id = inserted.rows[0]?.id;
-    if (!id) throw new Error("Failed to create client");
+  async update(id: number, input: UpdateClientInput, actorUserId: number): Promise<Client> {
+    const dbClient = await this.pool.connect();
+    try {
+      await dbClient.query("BEGIN");
+      const locked = await dbClient.query<{ is_demo: boolean }>(
+        "SELECT is_demo FROM clients WHERE id = $1 FOR UPDATE",
+        [id],
+      );
+      const target = locked.rows[0];
+      if (!target) throw new NotFoundException("Client not found");
+      if (target.is_demo) throw new BadRequestException("Demo clients are read-only");
+      const phoneNumber = normalizePhoneNumber(input.phoneNumber);
+      await assertUniqueClientPhone(dbClient, phoneNumber, id);
 
-    const result = await this.pool.query<ClientRow>(`${SELECT_CLIENT} WHERE c.id = $1`, [id]);
-    const row = result.rows[0];
-    if (!row) throw new Error("Failed to load created client");
-    return toClient(row);
+      const [beforeResult, feeGroupResult, stageResult] = await Promise.all([
+        dbClient.query<ClientRow>(`${SELECT_CLIENT} WHERE c.id = $1`, [id]),
+        dbClient.query("SELECT 1 FROM booking_fee_groups WHERE id = $1 AND active = true", [
+          input.bookingFeeGroupId,
+        ]),
+        dbClient.query("SELECT 1 FROM onboarding_stages WHERE code = $1 AND active = true", [
+          input.stage,
+        ]),
+      ]);
+      const beforeRow = beforeResult.rows[0];
+      if (!beforeRow) throw new NotFoundException("Client not found");
+      if ((feeGroupResult.rowCount ?? 0) === 0) {
+        throw new BadRequestException("Select an active booking fee group");
+      }
+      if ((stageResult.rowCount ?? 0) === 0) {
+        throw new BadRequestException("Select an active onboarding stage");
+      }
+
+      await dbClient.query(
+        `UPDATE clients
+         SET name = $2, client_type = $3, phone_number = $4,
+             preferred_rep_id = $5, secondary_rep_id = $6,
+             booking_fee_group_id = $7, stage = $8
+         WHERE id = $1`,
+        [
+          id,
+          input.name,
+          input.clientType,
+          phoneNumber,
+          input.preferredRepId,
+          input.secondaryRepId,
+          input.bookingFeeGroupId,
+          input.stage,
+        ],
+      );
+
+      const afterResult = await dbClient.query<ClientRow>(`${SELECT_CLIENT} WHERE c.id = $1`, [id]);
+      const afterRow = afterResult.rows[0];
+      if (!afterRow) throw new NotFoundException("Client not found");
+      const before = toClient(beforeRow);
+      const updated = toClient(afterRow);
+      await recordAudit(dbClient, actorUserId, "client.updated", "client", id, before, updated);
+      await dbClient.query("COMMIT");
+      return updated;
+    } catch (error) {
+      await dbClient.query("ROLLBACK");
+      throw error;
+    } finally {
+      dbClient.release();
+    }
   }
 
   /**
@@ -122,11 +267,16 @@ export class ClientsService {
       dob: string | null;
       passport_status: string;
       relationship: string | null;
+      is_demo: boolean;
     }>(
-      `SELECT t.id, t.name, t.dob, t.passport_status, ta.relationship
+      `SELECT t.id, t.name, to_char(t.dob, 'YYYY-MM-DD') AS dob,
+              t.passport_status, ta.relationship, t.is_demo
        FROM travellers t
        JOIN traveller_accounts ta ON ta.traveller_id = t.id
+       JOIN clients c ON c.id = ta.client_id
        WHERE ta.client_id = $1
+         AND (NOT c.is_demo OR COALESCE((SELECT demo_data_enabled FROM system_settings WHERE id = 1), false))
+         AND (NOT t.is_demo OR COALESCE((SELECT demo_data_enabled FROM system_settings WHERE id = 1), false))
        ORDER BY t.name ASC`,
       [clientId],
     );
@@ -136,6 +286,7 @@ export class ClientsService {
       dob: r.dob,
       passportStatus: r.passport_status,
       relationship: r.relationship,
+      isDemo: r.is_demo,
     }));
   }
 
@@ -145,11 +296,57 @@ export class ClientsService {
    * the composite primary key — the caller doesn't need to check first.
    */
   async linkTraveller(clientId: number, travellerId: number, relationship: string | null): Promise<void> {
+    const demoCheck = await this.pool.query<{ client_is_demo: boolean; traveller_is_demo: boolean }>(
+      `SELECT c.is_demo AS client_is_demo, t.is_demo AS traveller_is_demo
+       FROM clients c CROSS JOIN travellers t
+       WHERE c.id = $1 AND t.id = $2`,
+      [clientId, travellerId],
+    );
+    const target = demoCheck.rows[0];
+    if (target?.client_is_demo || target?.traveller_is_demo) {
+      throw new BadRequestException("Demo clients and travellers are read-only");
+    }
     await this.pool.query(
       `INSERT INTO traveller_accounts (client_id, traveller_id, relationship)
        VALUES ($1, $2, $3)
        ON CONFLICT (client_id, traveller_id) DO UPDATE SET relationship = EXCLUDED.relationship`,
       [clientId, travellerId, relationship],
+    );
+  }
+}
+
+function normalizePhoneNumber(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const digits = value.replace(/\D/g, "");
+  return digits ? `+${digits}` : null;
+}
+
+function phoneDigits(value: string): string {
+  return value.replace(/\D/g, "");
+}
+
+async function assertUniqueClientPhone(
+  dbClient: PoolClient,
+  phoneNumber: string | null,
+  excludeClientId?: number,
+): Promise<void> {
+  if (!phoneNumber) return;
+  const digits = phoneDigits(phoneNumber);
+  await dbClient.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`client-phone:${digits}`]);
+  const duplicate = await dbClient.query<{ id: number; name: string }>(
+    `SELECT id, name
+     FROM clients
+     WHERE NOT is_demo
+       AND regexp_replace(COALESCE(phone_number, ''), '[^0-9]', '', 'g') = $1
+       AND ($2::int IS NULL OR id <> $2)
+     ORDER BY created_at, id
+     LIMIT 1`,
+    [digits, excludeClientId ?? null],
+  );
+  const existing = duplicate.rows[0];
+  if (existing) {
+    throw new ConflictException(
+      `This phone number is already linked to ${existing.name} (client #${existing.id})`,
     );
   }
 }

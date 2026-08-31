@@ -163,6 +163,10 @@ function BookingFeesPage() {
         </PrimaryButton>
       </div>
 
+      <div className="mx-[22px] mb-[14px] border border-[#e6d9ab] bg-[#fdf7e6] px-[12px] py-[8px] text-[12px] text-[#785f12]">
+        Starter fee groups are demonstration data. Confirm the amounts and passenger rules before using them for live bookings.
+      </div>
+
       {showForm && (
         <form onSubmit={handleSubmit} className="mx-[22px] mb-[18px] border border-yb-line bg-yb-panel-head p-[16px]">
           <div className="mb-[12px] text-[15px] font-black">

@@ -51,4 +51,8 @@ export class MessagingGateway implements OnGatewayInit {
   emitConversationUpdated(conversationId: number): void {
     this.server.emit("conversation:updated", { conversationId });
   }
+
+  emitDraftIntakeUpdated(conversationId: number): void {
+    this.server.emit("draft-intake:updated", { conversationId });
+  }
 }

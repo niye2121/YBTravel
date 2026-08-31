@@ -1,5 +1,7 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppHeader } from "../components/AppShell/AppHeader";
+import { systemSettingsApi } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
 import { getStoredUser, hasAdminRole } from "../lib/session";
 
@@ -14,7 +16,7 @@ type SetupCard = {
   title: string;
   purpose: string;
   status: "Available" | "Needs decisions";
-  to?: "/users" | "/booking-fees" | "/onboarding-settings";
+  to?: "/users" | "/booking-fees" | "/message-templates" | "/onboarding-settings" | "/request-workflow-settings" | "/ai-provider-settings" | "/assignment-settings";
   includes: string[];
 };
 
@@ -50,19 +52,22 @@ const SETUP_AREAS: SetupCard[] = [
   {
     title: "Message Templates",
     purpose: "Approve copy-ready WhatsApp text by purpose and language.",
-    status: "Needs decisions",
+    status: "Available",
+    to: "/message-templates",
     includes: ["Welcome", "Missing information", "Booking-fee explanation", "Follow-up", "Language and sensitive-data policy"],
   },
   {
     title: "Request Workflow",
-    purpose: "Configure request types, statuses, urgency levels, and service deadlines.",
-    status: "Needs decisions",
-    includes: ["Request types", "Open/closed statuses", "Urgency levels", "Response and follow-up deadlines"],
+    purpose: "Configure request types, statuses, urgency levels, and deadline targets.",
+    status: "Available",
+    to: "/request-workflow-settings",
+    includes: ["Five approved request types", "Eleven approved statuses", "Normal, High, and Urgent levels", "Response and service deadlines"],
   },
   {
     title: "Assignment & Reminders",
     purpose: "Control representative availability, capacity, fallback, escalation, and reminder timing.",
-    status: "Needs decisions",
+    status: "Available",
+    to: "/assignment-settings",
     includes: ["Preferred and secondary representative", "Available-team fallback", "Capacity limits", "Unanswered and missing-information reminders"],
   },
   {
@@ -71,9 +76,30 @@ const SETUP_AREAS: SetupCard[] = [
     status: "Needs decisions",
     includes: ["Authorized group-creator roles", "Group-name template", "Default staff participants", "Provider and manual fallback policy"],
   },
+  {
+    title: "AI Provider",
+    purpose: "Connect the provider used for intake classification, information extraction, and response drafts.",
+    status: "Available",
+    to: "/ai-provider-settings",
+    includes: ["Encrypted OpenAI API key", "GPT-5.6 Luna recommended", "Usage and estimated cost history", "Mandatory human review and redaction"],
+  },
 ];
 
 function SetupOverviewPage() {
+  const queryClient = useQueryClient();
+  const settingsQuery = useQuery({ queryKey: ["system-settings"], queryFn: systemSettingsApi.get });
+  const demoDataMutation = useMutation({
+    mutationFn: systemSettingsApi.updateDemoData,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["system-settings"] }),
+        queryClient.invalidateQueries({ queryKey: ["clients"] }),
+        queryClient.invalidateQueries({ queryKey: ["travellers"] }),
+      ]);
+    },
+  });
+  const demoDataEnabled = settingsQuery.data?.demoDataEnabled ?? false;
+
   return (
     <div className="min-w-[1280px] bg-white text-yb-ink">
       <AppHeader tabs={NAV_TABS} />
@@ -92,9 +118,37 @@ function SetupOverviewPage() {
       </div>
 
       <div className="mx-[22px] mb-[14px] border border-yb-line bg-yb-panel-head px-[14px] py-[11px] text-[13px] text-yb-ink2">
-        <span className="font-bold text-yb-green">4 areas are configurable now.</span>{" "}
+        <span className="font-bold text-yb-green">8 areas are configurable now.</span>{" "}
         The other areas are listed here so the Setup structure is complete, but remain locked until their business rules are approved.
       </div>
+
+      <section className="mx-[22px] mb-[14px] border border-yb-line border-t-[3px] border-t-yb-green bg-white">
+        <div className="flex items-center gap-[18px] px-[16px] py-[13px]">
+          <div className="flex-1">
+            <div className="mb-[3px] text-[10px] font-bold tracking-[1.2px] text-yb-muted2">DEMO DATA</div>
+            <h2 className="text-[16px] font-black">Show sample clients and travellers</h2>
+            <p className="mt-[4px] max-w-[850px] text-[12.5px] leading-[18px] text-yb-muted">
+              Adds read-only Household, Company, and Individual examples to the Clients and Travellers screens. Turn this off before production use; live records are never removed or changed.
+            </p>
+          </div>
+          <label className="flex min-w-[210px] cursor-pointer items-center justify-between gap-[12px] border border-yb-line bg-yb-panel-head px-[12px] py-[9px] text-[12.5px] font-bold">
+            <span>{demoDataEnabled ? "Demo data enabled" : "Demo data disabled"}</span>
+            <input
+              type="checkbox"
+              aria-label="Show demo clients and travellers"
+              checked={demoDataEnabled}
+              disabled={settingsQuery.isLoading || demoDataMutation.isPending}
+              onChange={(event) => demoDataMutation.mutate(event.target.checked)}
+              className="h-[16px] w-[16px] accent-[#0d5c39]"
+            />
+          </label>
+        </div>
+        {demoDataMutation.isError && (
+          <div role="alert" className="border-t border-yb-line-soft bg-[#fff5f1] px-[16px] py-[7px] text-[12px] font-bold text-yb-red">
+            {demoDataMutation.error instanceof Error ? demoDataMutation.error.message : "Could not update demo data setting"}
+          </div>
+        )}
+      </section>
 
       <div className="mx-[22px] mb-[26px] grid grid-cols-4 gap-[12px]">
         {SETUP_AREAS.map((area) => {
