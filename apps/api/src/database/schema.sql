@@ -799,6 +799,14 @@ CREATE TABLE IF NOT EXISTS traveller_accounts (
 
 ALTER TABLE traveller_accounts
   DROP CONSTRAINT IF EXISTS traveller_accounts_relationship_check;
+
+-- Normalize the relationship label used by the original Phase 1 prototype
+-- before enforcing the controlled vocabulary. Existing links are preserved;
+-- only the legacy synonym changes to its current canonical value.
+UPDATE traveller_accounts
+SET relationship = 'child'
+WHERE lower(trim(relationship)) = 'kid';
+
 ALTER TABLE traveller_accounts
   ADD CONSTRAINT traveller_accounts_relationship_check CHECK (
     relationship IS NULL OR relationship IN (

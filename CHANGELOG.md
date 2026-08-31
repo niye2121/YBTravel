@@ -4,6 +4,14 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-08-31 — Production deployment and legacy relationship migration
+
+**What changed:** deployed the complete Phase 1 workflow and security revision to the YB Travel production preview stack. Added protected production CORS, AI-secret encryption, and backup-encryption settings, then rebuilt and replaced the API and web containers while preserving PostgreSQL data and WhatsApp authentication state.
+
+**Migration compatibility:** normalized the original prototype traveller relationship label `kid` to the controlled `child` value before enforcing the relationship constraint. This preserves the existing traveller link and keeps repeated schema application idempotent.
+
+**Safety and verification:** created a PostgreSQL custom-format backup before deployment. The final API health check reports a connected database, the web returns HTTP 200, production CORS accepts the deployed web origin, security headers are present, all three containers are running, and the new AI-provider and security schema objects were created successfully.
+
 ## 2026-08-31 — Remove Amharic from the US desk
 
 **What changed:** removed Amharic from traveller language preferences and removed both Amharic starter WhatsApp templates. The idempotent migration deletes existing Amharic message templates, and template validation prevents the unsupported language from being added again. English, Hebrew, and Yiddish remain available.
