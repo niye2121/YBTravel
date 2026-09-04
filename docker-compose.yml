@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: yb
+      POSTGRES_PASSWORD: yb_dev_password
+      POSTGRES_DB: yb_travel
+    # Mapped to 5433 on the host, not 5432 — several dev machines already run
+    # a native Postgres on 5432, and colliding with it silently routes
+    # connections to the wrong server instead of failing loudly.
+    ports:
+      - "5433:5432"
+    volumes:
+      - yb_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yb -d yb_travel"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  yb_postgres_data:

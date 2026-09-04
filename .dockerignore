@@ -1,0 +1,13 @@
+# Keeps Docker build context small and reproducible — everything here gets
+# reinstalled/rebuilt fresh inside the image, so shipping the host copies
+# would only slow the build and risk baking in host-specific state.
+node_modules
+**/node_modules
+**/dist
+**/.tanstack
+.git
+.claude
+.baileys-auth
+**/.baileys-auth
+*.log
+.DS_Store
