@@ -1,4 +1,4 @@
-import type { PoolClient } from "pg";
+import type { Pool, PoolClient } from "pg";
 
 /**
  * Shared transactional audit writer. Call this with the same PoolClient and
@@ -6,7 +6,7 @@ import type { PoolClient } from "pg";
  * actor, action, and before/after state recorded with it.
  */
 export async function recordAudit(
-  client: PoolClient,
+  client: Pool | PoolClient,
   actorUserId: number,
   action: string,
   entityType: string,

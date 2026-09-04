@@ -12,6 +12,7 @@ import { MESSAGING_CHANNEL, type MessagingChannel } from "./messaging-channel.in
 
 export type GroupParticipantInput = { id: number; phoneNumber: string };
 export type CreateWhatsAppGroupInput = {
+  accountId: number;
   clientId: number;
   travelRequestId: number;
   name: string;
@@ -33,6 +34,8 @@ export type WhatsAppGroupOptions = {
 
 export type WhatsAppGroupRecord = {
   id: number;
+  accountId: number;
+  accountLabel: string;
   clientId: number;
   clientName: string;
   travelRequestId: number;
@@ -55,6 +58,8 @@ export type WhatsAppGroupRecord = {
 
 type GroupRow = {
   id: number;
+  whatsapp_connection_id: number;
+  account_label: string;
   client_id: number;
   client_name: string;
   travel_request_id: number;
@@ -71,7 +76,7 @@ type GroupRow = {
 };
 
 const SELECT_GROUPS = `
-  SELECT g.id, g.client_id, c.name AS client_name,
+  SELECT g.id, g.whatsapp_connection_id, wc.label AS account_label, g.client_id, c.name AS client_name,
          g.travel_request_id, r.request_number, r.trip_summary,
          g.conversation_id, g.whatsapp_group_jid, g.name, g.status,
          g.failure_reason, u.name AS created_by_name, g.created_at,
@@ -87,6 +92,7 @@ const SELECT_GROUPS = `
            '[]'
          ) AS participants
   FROM whatsapp_groups g
+  JOIN whatsapp_connections wc ON wc.id = g.whatsapp_connection_id
   JOIN clients c ON c.id = g.client_id
   JOIN travel_requests r ON r.id = g.travel_request_id
   JOIN users u ON u.id = g.created_by
@@ -96,6 +102,8 @@ const SELECT_GROUPS = `
 function toGroup(row: GroupRow): WhatsAppGroupRecord {
   return {
     id: row.id,
+    accountId: row.whatsapp_connection_id,
+    accountLabel: row.account_label,
     clientId: row.client_id,
     clientName: row.client_name,
     travelRequestId: row.travel_request_id,
@@ -126,7 +134,7 @@ function isUniqueViolation(error: unknown): boolean {
 
 async function loadAuditState(client: PoolClient, groupId: number): Promise<Record<string, unknown>> {
   const result = await client.query(
-    `SELECT id, client_id, travel_request_id, conversation_id, whatsapp_group_jid,
+    `SELECT id, whatsapp_connection_id, client_id, travel_request_id, conversation_id, whatsapp_group_jid,
             name, status, failure_reason, created_by, created_at, updated_at
      FROM whatsapp_groups WHERE id = $1`,
     [groupId],
@@ -193,7 +201,7 @@ export class WhatsAppGroupsService {
 
   async list(): Promise<WhatsAppGroupRecord[]> {
     const result = await this.pool.query<GroupRow>(
-      `${SELECT_GROUPS} GROUP BY g.id, c.name, r.request_number, r.trip_summary, u.name
+      `${SELECT_GROUPS} GROUP BY g.id, wc.id, c.name, r.request_number, r.trip_summary, u.name
        ORDER BY g.created_at DESC, g.id DESC`,
     );
     return result.rows.map(toGroup);
@@ -274,7 +282,10 @@ export class WhatsAppGroupsService {
         throw new BadRequestException("Each participant must have a different WhatsApp phone number");
       }
 
-      const connectedPhone = this.channel.getPhoneNumber()?.replace(/\D/g, "") ?? null;
+      if (this.channel.getStatus(input.accountId) !== "connected") {
+        throw new BadRequestException("The selected WhatsApp account is not connected");
+      }
+      const connectedPhone = this.channel.getPhoneNumber(input.accountId)?.replace(/\D/g, "") ?? null;
       if (connectedPhone && participants.some((item) => item.phoneNumber === connectedPhone)) {
         throw new BadRequestException(
           "Do not add the connected YB Travel number as a participant; WhatsApp includes it automatically",
@@ -300,16 +311,16 @@ export class WhatsAppGroupsService {
         groupId = existingRow.id;
         await client.query(
           `UPDATE whatsapp_groups
-           SET name = $2, status = 'creating', failure_reason = NULL, updated_at = now()
+           SET name = $2, whatsapp_connection_id = $3, status = 'creating', failure_reason = NULL, updated_at = now()
            WHERE id = $1`,
-          [groupId, input.name],
+          [groupId, input.name, input.accountId],
         );
       } else {
         const inserted = await client.query<{ id: number }>(
           `INSERT INTO whatsapp_groups
-             (client_id, travel_request_id, name, status, created_by)
-           VALUES ($1, $2, $3, 'creating', $4) RETURNING id`,
-          [input.clientId, input.travelRequestId, input.name, actorUserId],
+             (whatsapp_connection_id, client_id, travel_request_id, name, status, created_by)
+           VALUES ($1, $2, $3, $4, 'creating', $5) RETURNING id`,
+          [input.accountId, input.clientId, input.travelRequestId, input.name, actorUserId],
         );
         groupId = inserted.rows[0]?.id as number;
       }
@@ -336,6 +347,7 @@ export class WhatsAppGroupsService {
 
     try {
       const created = await this.channel.createGroup(
+        input.accountId,
         input.name,
         participants.map((item) => item.phoneNumber),
       );
@@ -344,11 +356,11 @@ export class WhatsAppGroupsService {
         await finalClient.query("BEGIN");
         const beforeState = await loadAuditState(finalClient, groupId);
         const conversation = await finalClient.query<{ id: number }>(
-          `INSERT INTO conversations (whatsapp_jid, phone_number, display_name)
-           VALUES ($1, $2, $3)
-           ON CONFLICT (whatsapp_jid) DO UPDATE SET display_name = EXCLUDED.display_name
+          `INSERT INTO conversations (whatsapp_connection_id, whatsapp_jid, phone_number, display_name)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (whatsapp_connection_id, whatsapp_jid) DO UPDATE SET display_name = EXCLUDED.display_name
            RETURNING id`,
-          [created.jid, created.jid.split("@")[0] ?? created.jid, created.name],
+          [input.accountId, created.jid, created.jid.split("@")[0] ?? created.jid, created.name],
         );
         const conversationId = conversation.rows[0]?.id;
         if (!conversationId) throw new Error("Failed to link WhatsApp conversation");
@@ -428,7 +440,7 @@ export class WhatsAppGroupsService {
 
     const result = await this.pool.query<GroupRow>(
       `${SELECT_GROUPS} WHERE g.id = $1
-       GROUP BY g.id, c.name, r.request_number, r.trip_summary, u.name`,
+       GROUP BY g.id, wc.id, c.name, r.request_number, r.trip_summary, u.name`,
       [groupId],
     );
     const row = result.rows[0];

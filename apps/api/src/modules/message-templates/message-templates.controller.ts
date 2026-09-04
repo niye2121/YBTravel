@@ -13,6 +13,8 @@ import {
 import { z, ZodError } from "zod";
 import { AdminGuard } from "../auth/admin.guard";
 import { AuthGuard, type AuthenticatedRequest } from "../auth/auth.guard";
+import { AllowedRoles } from "../auth/allowed-roles.decorator";
+import { RoleGuard } from "../auth/role.guard";
 import {
   MessageTemplatesService,
   type MessageTemplate,
@@ -32,6 +34,7 @@ const messageTemplateSchema = z.object({
   messageBody: z.string().trim().min(1, "Message text is required").max(5000),
   active: z.boolean(),
 });
+const renderSchema = z.object({ conversationId: z.number().int().positive() });
 
 function parseInput(body: unknown): MessageTemplateInput {
   try {
@@ -72,5 +75,13 @@ export class MessageTemplatesController {
     @Body() body: unknown,
   ): Promise<MessageTemplate> {
     return this.messageTemplatesService.update(id, parseInput(body), request.user.id);
+  }
+
+  @Post(":id/render")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  render(@Param("id", ParseIntPipe) id: number, @Body() body: unknown) {
+    try { return this.messageTemplatesService.render(id, renderSchema.parse(body).conversationId); }
+    catch (error) { if (error instanceof ZodError) throw new BadRequestException(error.flatten().fieldErrors); throw error; }
   }
 }

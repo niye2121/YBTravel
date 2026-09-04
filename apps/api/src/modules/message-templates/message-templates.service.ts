@@ -1,7 +1,8 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { Pool } from "pg";
 import { recordAudit } from "../../database/audit";
 import { PG_POOL } from "../../database/database.module";
+import { OnboardingService } from "../clients/onboarding.service";
 
 export type MessageTemplate = {
   id: number;
@@ -64,7 +65,14 @@ function isUniqueViolation(error: unknown): boolean {
 
 @Injectable()
 export class MessageTemplatesService {
-  constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
+  constructor(@Inject(PG_POOL) private readonly pool: Pool, private readonly onboarding: OnboardingService) {}
+
+  private validateVariables(body: string) {
+    const allowed = new Set(["client_name", "request_number", "missing_items", "fee_amount", "currency"]);
+    const variables = [...body.matchAll(/{{\s*([a-z_]+)\s*}}/g)].map((match) => match[1]!);
+    const unknown = [...new Set(variables.filter((name) => !allowed.has(name)))];
+    if (unknown.length) throw new BadRequestException(`Unsupported template variables: ${unknown.join(", ")}`);
+  }
 
   async list(activeOnly: boolean): Promise<MessageTemplate[]> {
     const where = activeOnly ? "WHERE active = true" : "";
@@ -75,6 +83,7 @@ export class MessageTemplatesService {
   }
 
   async create(input: MessageTemplateInput, actorUserId: number): Promise<MessageTemplate> {
+    this.validateVariables(input.messageBody);
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -112,6 +121,7 @@ export class MessageTemplatesService {
   }
 
   async update(id: number, input: MessageTemplateInput, actorUserId: number): Promise<MessageTemplate> {
+    this.validateVariables(input.messageBody);
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -169,5 +179,49 @@ export class MessageTemplatesService {
     } finally {
       client.release();
     }
+  }
+
+  async render(id: number, conversationId: number) {
+    const templateResult = await this.pool.query<MessageTemplateRow>(`${SELECT_TEMPLATE} WHERE id = $1 AND active = true`, [id]);
+    const template = templateResult.rows[0];
+    if (!template) throw new NotFoundException("Active message template not found");
+    const contextResult = await this.pool.query<{
+      client_name: string | null; request_id: number | null; request_number: string | null;
+      fee_amount: string | null; currency: string | null;
+    }>(
+      `SELECT client.name AS client_name, request.id AS request_id, request.request_number,
+              quote.total_amount::text AS fee_amount, quote.currency
+       FROM conversations conversation
+       LEFT JOIN whatsapp_groups managed_group ON managed_group.conversation_id = conversation.id
+       LEFT JOIN clients client ON client.id = COALESCE(conversation.client_id, managed_group.client_id)
+       LEFT JOIN LATERAL (
+         SELECT r.id, r.request_number FROM travel_requests r
+         LEFT JOIN ai_draft_intakes d ON d.id = r.source_draft_intake_id
+         WHERE r.id = managed_group.travel_request_id OR d.conversation_id = conversation.id
+         ORDER BY (r.id = managed_group.travel_request_id) DESC, r.created_at DESC LIMIT 1
+       ) request ON true
+       LEFT JOIN LATERAL (
+         SELECT q.total_amount, q.currency FROM request_booking_fee_quotes q
+         WHERE q.travel_request_id = request.id ORDER BY q.calculated_at DESC, q.id DESC LIMIT 1
+       ) quote ON true
+       WHERE conversation.id = $1`, [conversationId]);
+    const context = contextResult.rows[0];
+    if (!context) throw new NotFoundException("Conversation not found");
+    let missingItems: string | null = null;
+    if (context.request_id) {
+      const status = await this.onboarding.getRequestStatus(context.request_id);
+      missingItems = status.missingItems.join(", ") || null;
+    }
+    const values: Record<string, string | null> = {
+      client_name: context.client_name,
+      request_number: context.request_number,
+      missing_items: missingItems,
+      fee_amount: context.fee_amount,
+      currency: context.currency,
+    };
+    const used = [...template.message_body.matchAll(/{{\s*([a-z_]+)\s*}}/g)].map((match) => match[1]!);
+    const missingVariables = [...new Set(used.filter((name) => !values[name]))];
+    const renderedText = template.message_body.replace(/{{\s*([a-z_]+)\s*}}/g, (token, name: string) => values[name] ?? token);
+    return { template: toMessageTemplate(template), renderedText, missingVariables };
   }
 }

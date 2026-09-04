@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { AppHeader } from "../components/AppShell/AppHeader";
 import { FilterStrip } from "../components/AppShell/FilterStrip";
 import { SecondaryButton } from "../components/AppShell/buttons";
+import { ImplementationStatusIcon } from "../components/ImplementationStatusIcon";
 import { BOOKINGS, BOOKING_FILTERS, money, type BookingRow } from "../data/bookingsData";
 import { NAV_TABS } from "../lib/navTabs";
 
@@ -58,8 +59,13 @@ function BookingsPage() {
         </div>
         <div className="flex-1" />
         <div className="flex items-center gap-[10px]">
-          <SecondaryButton>Export ▾</SecondaryButton>
+          <SecondaryButton className="group/status-parent flex items-center gap-[7px]" aria-disabled="true">Export ▾ <ImplementationStatusIcon label="Coming in Phase 2" description="Booking export will be added with the live booking workflow." withinInteractiveControl /></SecondaryButton>
         </div>
+      </div>
+
+      <div className="mx-[22px] mt-[-4px] mb-4 flex items-center gap-[7px] px-[22px] text-[12.5px] text-yb-muted3">
+        <ImplementationStatusIcon label="Coming in Phase 2" description="This page uses demonstration data. Booking and payment actions are not implemented yet." />
+        Preview only — booking and payment actions are not available from this screen yet.
       </div>
 
       <div className="mx-[22px] mb-[26px] rounded-yb border border-yb-line bg-white">

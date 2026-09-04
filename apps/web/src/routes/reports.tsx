@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AppHeader } from "../components/AppShell/AppHeader";
 import { Panel } from "../components/AppShell/Panel";
+import { ImplementationStatusIcon } from "../components/ImplementationStatusIcon";
 import { AGENT_WORKLOAD, CONVERSION, REVENUE, TICKETING_RISK } from "../data/reportsData";
 import { NAV_TABS } from "../lib/navTabs";
 
@@ -27,7 +28,7 @@ function ReportsPage() {
           <div className="text-[10.5px] font-bold tracking-[1.4px] text-yb-muted4">REPORTS</div>
           <div className="flex items-baseline gap-[10px]">
             <h1 className="mt-[1px] text-[26px] font-black tracking-[-0.2px]">Management Visibility</h1>
-            <span className="text-[13px] text-yb-muted3">summary figures, not live analytics yet</span>
+            <span className="flex items-center gap-[7px] text-[13px] text-yb-muted3">summary figures, not live analytics yet <ImplementationStatusIcon label="Coming in Phase 8" description="These are demonstration figures. Live reporting is not implemented yet." /></span>
           </div>
         </div>
       </div>

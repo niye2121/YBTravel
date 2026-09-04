@@ -9,6 +9,7 @@ import type { Pool, PoolClient } from "pg";
 import type { Client, CreateClientInput, UpdateClientInput } from "@yb-travel/shared";
 import { recordAudit } from "../../database/audit";
 import { PG_POOL } from "../../database/database.module";
+import { OnboardingService } from "./onboarding.service";
 
 type ClientRow = {
   id: number;
@@ -72,7 +73,10 @@ export type ClientTravellerRow = {
 
 @Injectable()
 export class ClientsService {
-  constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
+  constructor(
+    @Inject(PG_POOL) private readonly pool: Pool,
+    private readonly onboarding: OnboardingService,
+  ) {}
 
   async list(): Promise<Client[]> {
     const result = await this.pool.query<ClientRow>(
@@ -103,15 +107,6 @@ export class ClientsService {
     try {
       await dbClient.query("BEGIN");
       const phoneNumber = normalizePhoneNumber(input.phoneNumber);
-      await assertUniqueClientPhone(dbClient, phoneNumber);
-
-      const feeGroup = await dbClient.query(
-        "SELECT 1 FROM booking_fee_groups WHERE id = $1 AND active = true",
-        [input.bookingFeeGroupId],
-      );
-      if ((feeGroup.rowCount ?? 0) === 0) {
-        throw new BadRequestException("Select an active booking fee group");
-      }
 
       let conversationBefore: { id: number; phoneNumber: string; clientId: number | null } | null = null;
       if (input.conversationId) {
@@ -124,9 +119,6 @@ export class ClientsService {
         ]);
         const conversation = conversationResult.rows[0];
         if (!conversation) throw new BadRequestException("WhatsApp conversation not found");
-        if (conversation.client_id !== null) {
-          throw new ConflictException("This WhatsApp conversation is already linked to a client");
-        }
         if (!phoneNumber || phoneDigits(phoneNumber) !== phoneDigits(conversation.phone_number)) {
           throw new BadRequestException("Client phone number must match the WhatsApp conversation");
         }
@@ -135,6 +127,41 @@ export class ClientsService {
           phoneNumber: conversation.phone_number,
           clientId: conversation.client_id,
         };
+
+        if (conversation.client_id !== null) {
+          const linked = await loadClientById(dbClient, conversation.client_id);
+          await dbClient.query("COMMIT");
+          return linked;
+        }
+
+        const existing = await findClientByPhone(dbClient, phoneNumber);
+        if (existing) {
+          await dbClient.query("UPDATE conversations SET client_id = $2 WHERE id = $1", [
+            conversation.id,
+            existing.id,
+          ]);
+          await recordAudit(
+            dbClient,
+            actorUserId,
+            "conversation.client_linked",
+            "conversation",
+            conversation.id,
+            conversationBefore,
+            { ...conversationBefore, clientId: existing.id },
+          );
+          await dbClient.query("COMMIT");
+          return loadClientById(this.pool, existing.id);
+        }
+      }
+
+      await assertUniqueClientPhone(dbClient, phoneNumber);
+
+      const feeGroup = await dbClient.query(
+        "SELECT 1 FROM booking_fee_groups WHERE id = $1 AND active = true",
+        [input.bookingFeeGroupId],
+      );
+      if ((feeGroup.rowCount ?? 0) === 0) {
+        throw new BadRequestException("Select an active booking fee group");
       }
 
       const inserted = await dbClient.query<{ id: number }>(
@@ -152,6 +179,7 @@ export class ClientsService {
       );
       const id = inserted.rows[0]?.id;
       if (!id) throw new Error("Failed to create client");
+      await this.onboarding.recordInitialStage(dbClient, id, "new_inquiry", actorUserId);
 
       if (conversationBefore) {
         await dbClient.query("UPDATE conversations SET client_id = $2 WHERE id = $1", [
@@ -180,6 +208,9 @@ export class ClientsService {
       return created;
     } catch (error) {
       await dbClient.query("ROLLBACK");
+      if (isClientPhoneConstraintError(error)) {
+        throw new ConflictException("This phone number is already linked to another client");
+      }
       throw error;
     } finally {
       dbClient.release();
@@ -217,6 +248,14 @@ export class ClientsService {
       if ((stageResult.rowCount ?? 0) === 0) {
         throw new BadRequestException("Select an active onboarding stage");
       }
+      await this.onboarding.applyStageTransition(
+        dbClient,
+        id,
+        beforeRow.stage,
+        input.stage,
+        input.onboardingTransitionReason ?? null,
+        actorUserId,
+      );
 
       await dbClient.query(
         `UPDATE clients
@@ -331,6 +370,19 @@ async function assertUniqueClientPhone(
   excludeClientId?: number,
 ): Promise<void> {
   if (!phoneNumber) return;
+  const existing = await findClientByPhone(dbClient, phoneNumber, excludeClientId);
+  if (existing) {
+    throw new ConflictException(
+      `This phone number is already linked to ${existing.name} (client #${existing.id})`,
+    );
+  }
+}
+
+async function findClientByPhone(
+  dbClient: PoolClient,
+  phoneNumber: string,
+  excludeClientId?: number,
+): Promise<{ id: number; name: string } | null> {
   const digits = phoneDigits(phoneNumber);
   await dbClient.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`client-phone:${digits}`]);
   const duplicate = await dbClient.query<{ id: number; name: string }>(
@@ -343,10 +395,26 @@ async function assertUniqueClientPhone(
      LIMIT 1`,
     [digits, excludeClientId ?? null],
   );
-  const existing = duplicate.rows[0];
-  if (existing) {
-    throw new ConflictException(
-      `This phone number is already linked to ${existing.name} (client #${existing.id})`,
-    );
-  }
+  return duplicate.rows[0] ?? null;
+}
+
+async function loadClientById(
+  db: Pick<Pool, "query"> | Pick<PoolClient, "query">,
+  id: number,
+): Promise<Client> {
+  const result = await db.query<ClientRow>(`${SELECT_CLIENT} WHERE c.id = $1`, [id]);
+  const row = result.rows[0];
+  if (!row) throw new NotFoundException("Client not found");
+  return toClient(row);
+}
+
+function isClientPhoneConstraintError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "23505" &&
+      "constraint" in error &&
+      error.constraint === "clients_phone_digits_unique",
+  );
 }

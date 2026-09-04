@@ -19,14 +19,15 @@ async function run() {
 
   const channel = {
     getStatus: () => status,
-    resolveDirectRecipient: async (phoneNumber) => {
+    resolveDirectRecipient: async (accountId, phoneNumber) => {
+      assert.equal(accountId, 1);
       resolvedNumber = phoneNumber;
       return recipient;
     },
   };
   const conversations = {
-    findOrCreateConversation: async (jid, phoneNumber, displayName) => {
-      storedRecipient = { jid, phoneNumber, displayName };
+    findOrCreateConversation: async (accountId, jid, phoneNumber, displayName) => {
+      storedRecipient = { accountId, jid, phoneNumber, displayName };
       return 42;
     },
   };
@@ -35,11 +36,12 @@ async function run() {
       emittedConversationId = id;
     },
   };
-  const service = new MessagingService(channel, conversations, gateway);
+  const service = new MessagingService({}, channel, conversations, gateway, {});
+  service.accounts.set(1, { id: 1, label: "Primary WhatsApp", authKey: "primary", status: "connected", qr: null, phoneNumber: "15550000000", isPrimary: true, createdAt: new Date().toISOString(), lastConnectedAt: null });
 
   assert.deepEqual(await service.startDirectConversation("+1 (202) 555-0123"), { id: 42 });
   assert.equal(resolvedNumber, "12025550123");
-  assert.deepEqual(storedRecipient, recipient);
+  assert.deepEqual(storedRecipient, { accountId: 1, ...recipient });
   assert.equal(emittedConversationId, 42);
 
   await assert.rejects(

@@ -4,6 +4,154 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-09-04 — Add multiple WhatsApp profiles locally
+
+**What changed:** administrators can now open Setup → WhatsApp Accounts, retain the existing number as the Primary WhatsApp profile, and add independently named accounts. Each account has its own QR code, connection status, phone number, reconnect action, disconnect action, live Baileys socket, and authentication directory. The Inbox includes an account selector, filters conversations by profile, starts new conversations from the selected number, and routes text replies and voice notes through the account that owns the conversation. Managed groups also require and retain an owning account.
+
+**Session and history preservation:** the original `apps/api/.baileys-auth` directory remains the Primary profile's active credential location and was not moved, cleared, or logged out. Additional credentials are isolated under `.baileys-auth/accounts/<account-key>`. Existing conversations and groups were migrated to Primary, while the new compound conversation identity permits the same customer or group JID to exist independently under different accounts. Disconnecting one account preserves database history and cannot archive or log out another account's credentials.
+
+**Backups and verification:** before migration, created and verified an encrypted PostgreSQL snapshot with 351 restore entries plus a checksum-verified archive of all 43 Primary authentication files. The local schema migration assigned all 3 conversations and the managed group to Primary. After restarting, the saved session restored automatically as `+251906375151` without a QR scan. Workspace typechecks and production builds pass, as do direct-conversation, voice-note, account-isolation, and per-account disconnect tests plus authenticated local API smoke checks.
+
+**Deployment:** local only. Nothing was pushed or deployed.
+
+## 2026-09-04 — Publish the updated Phase 1 functional testing guide
+
+**What changed:** created a management-ready 21-page functional guide that explains the current Phase 1 release status in plain language and provides exact actions and expected results for login/navigation, WhatsApp connection and direct messaging, managed groups, voice notes, AI intake, clients, travellers, onboarding, required-information review, booking fees, approved templates, notes/documents/history, requests, assignment, notifications, administration, and test-data reset safeguards.
+
+**Release clarity:** the guide explicitly separates capabilities already available on the production preview from the onboarding, fee, template, records, and corrected voice-note changes that remain local. It retains the authoritative 12-complete, 5-partial, and 4-missing matrix and explains why durable reminders and central role/permission enforcement still prevent declaring all of Phase 1 complete.
+
+**Testing and safety:** each functional area includes preconditions, numbered steps, expected outcomes, failure evidence, and relevant safety limits. The guide includes a management result sheet and excludes passwords, API keys, QR codes, passport values, payment details, and private credentials.
+
+**Verification:** the PDF was text-checked, all 21 A4 pages were rendered, the complete page set was visually reviewed, and the cover contrast was corrected and re-rendered.
+
+## 2026-09-04 — Fix WhatsApp voice-note delivery locally
+
+**What changed:** Chrome recordings are now converted from WebM/Opus into WhatsApp-compatible Ogg/Opus push-to-talk audio before the message is stored and submitted to the connected provider. Uploaded MP4, MP3, WAV, and non-Opus Ogg audio use the same bounded conversion path, so retries reuse the normalized payload instead of repeating an incompatible upload.
+
+**Delivery clarity:** an outbound message now shows one check mark after WhatsApp accepts it. The former unconditional double check incorrectly implied recipient delivery even though the current connector does not yet persist delivery receipts.
+
+**Verification:** the focused regression suite generates a real WebM recording, converts it, verifies the Ogg/Opus signature and MIME type, and confirms the normalized payload is stored and sent. API and web typechecks, the API build, the Node 24 web production build, and signed-in local Inbox inspection pass with no browser warnings or errors. No test message was sent to a real phone during automated verification.
+
+**Deployment:** local only. Nothing was pushed or deployed.
+
+## 2026-09-03 — Complete fees, approved templates, and record history locally
+
+**Booking fees (P1-03):** request profiles now select saved client travellers with adult/child/infant categories and apply the client’s active per-passenger or per-booking fee rule. Every confirmed calculation appends the fee-group identity, amount, basis, passenger lines, charged units, total, actor, and timestamp; later administrator edits do not rewrite that snapshot.
+
+**WhatsApp templates (P1-09):** the Inbox now offers active approved templates by purpose and language. The API allow-lists variables and derives client, request, missing-information, and saved fee values from the linked conversation. It reports unresolved variables visibly and places rendered wording into the editable reply composer without sending it.
+
+**Records (P1-11):** client and request profiles now have scoped notes, document upload/download, and unified history. Documents accept signature-validated PDF/JPEG/PNG files up to 10 MB, store SHA-256 integrity metadata, require an operational role, and record downloads in sensitive-access history. Audit events contain metadata only, never file bytes.
+
+**Verification:** the schema applied twice locally; the combined integration test passed for fee category rules, immutable quote data, contextual rendering, notes, document integrity/download, and unified activity, with unique test rows cleaned afterward. Workspace typechecks, API build, Node 24 web build, and signed-in local browser inspection pass. The temporary template draft used for browser verification was cleared and no WhatsApp message was sent.
+
+**Deployment:** local only. Nothing was pushed or deployed.
+
+## 2026-09-03 — Complete Phase 1 onboarding and information gates locally
+
+**What changed:** implemented the P1-05 through P1-08 workflow across clients, linked travellers, and travel requests. Client profiles now calculate and display missing information, present-but-unreviewed fields, the next required action, controlled stage choices, transition history, and generated milestone tasks. Request profiles now store and display passenger count, route, travel-date text, cabin, flexibility, and special requests with the same configured missing-information and review model.
+
+**Enforcement:** clients move forward only one active onboarding stage at a time; backward moves require a reason. The completion stage is rejected transactionally until every required client/traveller value is present and every review-required current value has staff evidence. Review evidence stores a SHA-256 value fingerprint, so editing a reviewed value automatically makes the review stale without placing the sensitive value in audit metadata.
+
+**Verification:** the idempotent schema was applied twice locally; workspace typechecking and the Node 24 production build pass; the new transaction-rolled-back onboarding integration test covers tasks, progression, completion, request completeness, and review invalidation; the existing client duplicate-prevention regression still passes. Signed-in local browser inspection confirms both client and request workflows render the correct controls and status language. Manual acceptance cases are in `docs/testing/PHASE1-ONBOARDING-USER-TESTS.md`.
+
+**Deployment:** local only. Nothing in this change was pushed, uploaded, or deployed to the preview server.
+
+## 2026-09-03 — Send and play WhatsApp voice notes in the Inbox
+
+**What changed:** staff can record a voice note in a supported secure browser or upload an existing WebM, Ogg, MP4, MP3, or WAV recording from an open Inbox conversation. The API validates the file signature and 10 MB/one-hour limits, stores the outbound item before delivery, and sends it through the connected WhatsApp session as push-to-talk audio. Incoming WhatsApp voice notes are downloaded with the same size bound, persisted with their MIME type, checksum, size, and duration, and rendered with an authenticated, on-demand audio player in the conversation history.
+
+**Safety and continuity:** voice-note bytes are served only through an authenticated endpoint, are never copied into audit metadata, and participate in the existing delivery-attempt/retry tracking. Audio messages deliberately bypass the text-only AI intake parser. Existing text messages and disconnected-session history are unchanged.
+
+**Browser limitation:** direct microphone capture requires a secure browser context (HTTPS or localhost). The Inbox provides audio-file upload as a fallback on the current HTTP preview deployment. This implements recorded voice notes; WhatsApp live voice calling is not exposed by the current Baileys connector.
+
+**Verification:** the schema applies cleanly twice; focused voice-note, direct-conversation, disconnect, and security regression suites pass; all workspace TypeScript checks pass; the Node 24 web production build succeeds; and authenticated local browser inspection confirms the record/upload composer is visible without activating the microphone or transmitting a customer message.
+
+## 2026-09-03 — Restore QR pairing after WhatsApp disconnect
+
+**What changed:** fixed the administrator disconnect and reconnect flow so it can start a clean WhatsApp pairing session when the authentication directory is a Docker named-volume mount. The connector now keeps the mounted directory in place, moves only retired credential files into a timestamped backup inside the persistent volume, and starts Baileys against the clean root so the Inbox can receive and display a new QR code.
+
+**Retry resilience:** **Try connection again** now replaces a stale socket when it has neither connected nor produced a usable QR. Close callbacks are invalidated before replacement, preventing an old socket from racing or repeatedly rotating the new session.
+
+**Why:** production returned `EBUSY` while trying to rename `/repo/apps/api/.baileys-auth`, because Linux does not permit renaming a mounted directory. The failure left invalid credentials in place and prevented QR generation.
+
+**Verification:** the focused regression suite covers logout, QR-safe auditing, and Docker-compatible credential rotation while proving the mounted auth root remains present and retired credentials are preserved under `.backups`.
+
+## 2026-09-02 — Deploy the gated test-data reset to the preview server
+
+**What changed:** synchronized the administrator-controlled test-data reset to the isolated YB Travel preview stack at `2.24.28.178`, rebuilt the API and web images, and recreated only those two services. The existing PostgreSQL container, database volume, server secrets, backup directory, and WhatsApp authentication volume were preserved.
+
+**Safety:** created a restricted custom-format PostgreSQL dump at `/srv/yb-travel/backups/pre-deploy-test-data-reset-2026-09-02-1845.dump` and verified its archive catalogue before the rollout. The deployed feature switch remains off by default, and the destructive reset was not invoked during deployment or verification.
+
+**Verification:** the public Inbox returns HTTP 200 and `/health` reports the API and database healthy. The new schema column exists with a false default and current value, both administrator routes are mapped, and an anonymous reset request is rejected with HTTP 401. Pre- and post-deployment counts remain 13 clients, 25 travellers, 16 conversations, and 1,648 messages; all 110 WhatsApp credential files remain mounted and WhatsApp reconnected. The unrelated PM2 applications remain online; the separate `qrebnt` Odoo containers were already restarting before this deployment and were not modified.
+
+## 2026-09-02 — Add a gated administrator test-data reset
+
+**What changed:** Setup now has an administrator-only switch that reveals a one-use **Delete all test data** button beside the WhatsApp disconnect control in the Inbox. The action requires typing `DELETE ALL TEST DATA` exactly, runs in one database transaction, and automatically turns its Setup switch off after a successful reset.
+
+**Deletion scope:** the reset removes operational WhatsApp conversations and messages, managed groups, requests, clients, travellers, assignments, draft intake records, and staff notifications. It deliberately preserves administrator and employee accounts, application configuration, audit and security history, AI credentials and usage history, and the connected WhatsApp account and authentication session so the system remains accessible and traceable.
+
+**Verification:** added mock-backed regression coverage proving the action is blocked unless enabled, clears only the intended operational roots, excludes protected tables, records deletion counts in the audit log, and disables itself after use. Workspace typechecking and both API and web production builds pass. The destructive reset was not executed against live or local application data.
+
+## 2026-09-02 — Deploy Phase 1 status and WhatsApp updates to the preview server
+
+**What changed:** synchronized the current YB Travel workspace to the isolated preview stack at `2.24.28.178`, rebuilt the API and web images, and recreated the three Compose services. The existing PostgreSQL and Baileys named volumes were retained, so application records and the paired WhatsApp session survived the rollout. A fresh pre-deployment PostgreSQL dump was stored on the server before the rebuild.
+
+**Verification:** the deployed web Inbox returns HTTP 200, `/health` reports both the API and database healthy, all three YB Travel containers are running, and WhatsApp reconnected to the preserved account. Authenticated production-browser verification confirmed the new construction indicators and phase explanations are present on Bookings, Tickets, Reports, and More. Unrelated Docker and PM2 workloads remained in their pre-deployment state.
+
+**Operational follow-up:** the image build reported 21 npm audit findings (4 low, 11 moderate, and 6 high). No automatic dependency upgrade was applied during the production rollout because the available blanket fix may include breaking changes; review and patch these separately with regression testing.
+
+## 2026-09-02 — Open managed WhatsApp groups in the Inbox
+
+**What changed:** active group names on Managed Groups now open their exact linked WhatsApp Inbox conversation. The selected conversation is stored in a validated URL query parameter, so it remains selected after a refresh and staff can read its history, see linked client/request context, and use the existing reply composer.
+
+**Verification:** the web typecheck and production build pass. Signed-in Chrome testing confirmed the group opens in the Inbox, remains selected after reload, and accepts a message draft with the Send action enabled. The draft was cleared without sending a live WhatsApp message, and the browser reported no errors or warnings.
+
+## 2026-09-02 — Show which screens and controls are not implemented
+
+**What changed:** added a consistent construction-status icon with an accessible hover and keyboard-focus explanation. The primary navigation now identifies Bookings as a Phase 2 preview, Tickets as a Phase 3 preview dependent on Sabre, and Reports as Phase 8 demonstration analytics. The unused More menu is also explicitly marked unavailable.
+
+**Phase 1 clarity:** marked demonstration-only Request workflow filters; inactive new-request, bulk-assignment, print, export, and custom-view actions; Client export and custom views; and Traveller import/export, My Travellers, custom views, scan upload, secure-program, preference, loyalty, and currently unsaved profile fields. Working Phase 1 paths remain unmarked: Inbox, live request lists and details, Clients, and the core Traveller record flow.
+
+**Verification:** web TypeScript checking and the Node 24 production build pass. Local browser verification confirmed that status icons are exposed to assistive technology and that hover explanations display clearly in both the primary navigation and workflow filters. The temporary local administrator used for visual verification was removed afterward.
+
+## 2026-09-02 — Add administrator-controlled WhatsApp disconnect and re-pairing
+
+**What changed:** System Administrators now see a **Disconnect WhatsApp** action in the connected Inbox. After an explicit confirmation, the API logs out the linked WhatsApp device, invalidates the old socket callbacks, preserves the retired local authentication state, and immediately starts a clean pairing session. The existing Inbox status moves through **Disconnected** to **Waiting for scan** and displays the new QR code without removing stored conversations or message history.
+
+**Security and audit:** added an authenticated, database-role-checked `POST /messaging/disconnect` endpoint restricted to `system_administrator`. Each successful action is written to the shared audit log with the previous and next connection state; the short-lived QR pairing token is deliberately excluded. Non-admin users do not see the control, and server-side authorization remains authoritative.
+
+**Verification:** added a focused regression test covering provider logout, retired-auth preservation, fresh QR pairing, status events, and QR-safe auditing. The full workspace typecheck, API build, web production build, database-backed security regression suite, and unauthenticated endpoint rejection all pass. The live paired WhatsApp account was not disconnected during automated verification.
+
+## 2026-09-01 — Make Inbox client creation idempotent and enforce unique phone numbers
+
+**What changed:** repeated **Create & Link Client** submissions now return the client already linked to the WhatsApp conversation instead of creating another record. If a different Inbox conversation uses a phone number that already belongs to a real client, the system links that conversation to the existing client. The form identifies the match in advance and changes its action to **Link Existing Client**.
+
+**Database protection:** added a normalized-phone trigger that serializes inserts and updates by phone digits, stores canonical `+digits` values, and rejects duplicate real-client numbers even when a write bypasses the normal client service. The trigger is compatible with legacy databases because it prevents new duplicates without making deployment depend on cleaning historical rows first. Added a database-backed regression test covering repeated submissions, two conversations sharing a number, normal duplicate rejection, formatting differences, and direct database bypass attempts.
+
+**Why:** Inbox client creation must be safe to retry. Duplicate prevention now holds at the user interface, service transaction, and PostgreSQL boundary rather than depending on one application check.
+
+## 2026-08-31 — Improve cover-table contrast in the management PDF
+
+**What changed:** changed the management report cover-page status table to white text with white outer and internal borders. The report date, current state, live review URL, and deployed revision are now clearly legible against the dark green cover background.
+
+**Verification:** regenerated the OpenAI-key-scope management report, rendered the updated cover at high resolution, and visually confirmed the requested contrast improvement without changing the report content or layout.
+
+## 2026-08-31 — Clarify OpenAI-key-only scope in the management report
+
+**What changed:** revised the boss-ready Phase 1 management PDF with a dedicated OpenAI configuration appendix. The clarification states that the current rollout requires one OpenAI application API key only; other AI providers, provider switching, and automatic provider fallback are deferred.
+
+**Security and operations:** documented administrator-only entry through Setup → AI Provider, encrypted server-side storage, masked display after saving, connection testing, controlled failure behavior, usage and estimated-cost history, credential rotation, and OpenAI billing as the authoritative cost source. The report contains no API key or secret value.
+
+**Human-control boundary:** documented that OpenAI may classify intake, extract structured travel details, identify missing information, and prepare suggested replies, but an employee must review the draft before a request is created or a client response is sent. The revised 16-page PDF was text-validated and every page was rendered for visual inspection.
+
+## 2026-08-31 — Keep long WhatsApp conversations inside a scrollable inbox pane
+
+**What changed:** constrained the three-column WhatsApp workspace to the available browser height, capped it at the existing 700px desktop size, and added the missing `min-height: 0` and overflow containment rules to all three columns. The conversation list, message history, and AI/context sidebar now scroll independently with stable scrollbar space; the reply composer and conversation header remain visible while an employee reviews long message histories.
+
+**Why:** long WhatsApp sessions were forcing the flex/grid children beyond the intended 700px workspace, making the entire page grow into a very long document. The operator then had to scroll the browser page instead of scrolling only the conversation history. The new containment keeps the familiar layout and message cards while giving long sessions a fixed-height vertical scroller.
+
+**Verification:** the web TypeScript check and the Node 24 production build pass. Browser measurement at the desktop review viewport confirmed a 534px message-history viewport with `overflow-y: auto`, while the complete page remained 881px tall in an 880px viewport. The reported production conversation was used as the long-message reference state.
+
 ## 2026-08-31 — Production deployment and legacy relationship migration
 
 **What changed:** deployed the complete Phase 1 workflow and security revision to the YB Travel production preview stack. Added protected production CORS, AI-secret encryption, and backup-encryption settings, then rebuilt and replaced the API and web containers while preserving PostgreSQL data and WhatsApp authentication state.

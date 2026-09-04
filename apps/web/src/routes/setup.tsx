@@ -16,7 +16,7 @@ type SetupCard = {
   title: string;
   purpose: string;
   status: "Available" | "Needs decisions";
-  to?: "/users" | "/booking-fees" | "/message-templates" | "/onboarding-settings" | "/request-workflow-settings" | "/ai-provider-settings" | "/assignment-settings";
+  to?: "/users" | "/booking-fees" | "/message-templates" | "/onboarding-settings" | "/request-workflow-settings" | "/ai-provider-settings" | "/assignment-settings" | "/whatsapp-accounts";
   includes: string[];
 };
 
@@ -72,9 +72,10 @@ const SETUP_AREAS: SetupCard[] = [
   },
   {
     title: "WhatsApp Integration",
-    purpose: "Manage the shared number, provider behavior, group creation, and manual fallback.",
-    status: "Needs decisions",
-    includes: ["Authorized group-creator roles", "Group-name template", "Default staff participants", "Provider and manual fallback policy"],
+    purpose: "Connect and operate multiple independent WhatsApp numbers without losing stored conversations.",
+    status: "Available",
+    to: "/whatsapp-accounts",
+    includes: ["Preserved primary session", "Independent QR code per account", "Per-account Inbox routing", "Disconnect one account without affecting the others"],
   },
   {
     title: "AI Provider",
@@ -98,7 +99,12 @@ function SetupOverviewPage() {
       ]);
     },
   });
+  const testDataDeletionMutation = useMutation({
+    mutationFn: systemSettingsApi.updateTestDataDeletion,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["system-settings"] }),
+  });
   const demoDataEnabled = settingsQuery.data?.demoDataEnabled ?? false;
+  const testDataDeletionEnabled = settingsQuery.data?.testDataDeletionEnabled ?? false;
 
   return (
     <div className="min-w-[1280px] bg-white text-yb-ink">
@@ -118,7 +124,7 @@ function SetupOverviewPage() {
       </div>
 
       <div className="mx-[22px] mb-[14px] border border-yb-line bg-yb-panel-head px-[14px] py-[11px] text-[13px] text-yb-ink2">
-        <span className="font-bold text-yb-green">8 areas are configurable now.</span>{" "}
+        <span className="font-bold text-yb-green">9 areas are configurable now.</span>{" "}
         The other areas are listed here so the Setup structure is complete, but remain locked until their business rules are approved.
       </div>
 
@@ -146,6 +152,34 @@ function SetupOverviewPage() {
         {demoDataMutation.isError && (
           <div role="alert" className="border-t border-yb-line-soft bg-[#fff5f1] px-[16px] py-[7px] text-[12px] font-bold text-yb-red">
             {demoDataMutation.error instanceof Error ? demoDataMutation.error.message : "Could not update demo data setting"}
+          </div>
+        )}
+      </section>
+
+      <section className="mx-[22px] mb-[14px] border border-yb-red border-t-[3px] border-t-yb-red bg-white">
+        <div className="flex items-center gap-[18px] px-[16px] py-[13px]">
+          <div className="flex-1">
+            <div className="mb-[3px] text-[10px] font-bold tracking-[1.2px] text-yb-red">DESTRUCTIVE TEST TOOL</div>
+            <h2 className="text-[16px] font-black">Show “Delete all test data” in the Inbox</h2>
+            <p className="mt-[4px] max-w-[880px] text-[12.5px] leading-[18px] text-yb-muted">
+              Enables a one-use administrator button that permanently removes operational WhatsApp messages, conversations, groups, requests, clients, travellers, assignments, and notifications. Users, configuration, audit/security history, AI settings and usage, and the connected WhatsApp session are preserved.
+            </p>
+          </div>
+          <label className="flex min-w-[250px] cursor-pointer items-center justify-between gap-[12px] border border-yb-red bg-[#fff3f1] px-[12px] py-[9px] text-[12.5px] font-bold text-yb-red">
+            <span>{testDataDeletionEnabled ? "Deletion button enabled" : "Deletion button disabled"}</span>
+            <input
+              type="checkbox"
+              aria-label="Show Delete all test data button in Inbox"
+              checked={testDataDeletionEnabled}
+              disabled={settingsQuery.isLoading || testDataDeletionMutation.isPending}
+              onChange={(event) => testDataDeletionMutation.mutate(event.target.checked)}
+              className="h-[16px] w-[16px] accent-[#9c2b1c]"
+            />
+          </label>
+        </div>
+        {testDataDeletionMutation.isError && (
+          <div role="alert" className="border-t border-yb-line-soft bg-[#fff5f1] px-[16px] py-[7px] text-[12px] font-bold text-yb-red">
+            {testDataDeletionMutation.error instanceof Error ? testDataDeletionMutation.error.message : "Could not update test data deletion setting"}
           </div>
         )}
       </section>

@@ -1,5 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import type { NavTab } from "../../lib/navTabs";
+import { ImplementationStatusIcon } from "../ImplementationStatusIcon";
 
 export function PrimaryNav({ tabs, compact = false }: { tabs: NavTab[]; compact?: boolean }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -13,7 +14,7 @@ export function PrimaryNav({ tabs, compact = false }: { tabs: NavTab[]; compact?
             <Link
               key={tab.label}
               to={tab.to}
-              className={
+              className={`group/status-parent ${
                 active
                   ? compact
                     ? "rounded-t-yb-tile bg-white px-[16px] py-[7px] text-[12px] font-bold text-yb-green"
@@ -21,9 +22,12 @@ export function PrimaryNav({ tabs, compact = false }: { tabs: NavTab[]; compact?
                   : compact
                     ? "px-[14px] py-[6px] text-[12px] text-yb-nav-text"
                     : "px-5 pt-[9px] pb-3 text-[15px] font-bold text-yb-nav-text"
-              }
+              }`}
             >
-              {tab.label}
+              <span className="flex items-center gap-[6px]">
+                {tab.label}
+                {tab.implementation && <ImplementationStatusIcon {...tab.implementation} withinInteractiveControl />}
+              </span>
             </Link>
           );
         }
@@ -31,15 +35,23 @@ export function PrimaryNav({ tabs, compact = false }: { tabs: NavTab[]; compact?
           <button
             key={tab.label}
             type="button"
-            className={compact ? "cursor-default px-[14px] py-[6px] text-[12px] text-yb-nav-text" : "cursor-default px-5 pt-[9px] pb-3 text-[15px] font-bold text-yb-nav-text"}
+            className={compact ? "group/status-parent cursor-default px-[14px] py-[6px] text-[12px] text-yb-nav-text" : "group/status-parent cursor-default px-5 pt-[9px] pb-3 text-[15px] font-bold text-yb-nav-text"}
           >
-            {tab.label}
+            <span className="flex items-center gap-[6px]">
+              {tab.label}
+              {tab.implementation && <ImplementationStatusIcon {...tab.implementation} withinInteractiveControl />}
+            </span>
           </button>
         );
       })}
       <div className="flex-1" />
-      <button type="button" className={compact ? "cursor-default px-1 py-[6px] text-[12px] text-yb-nav-more" : "cursor-default px-1 pb-3 text-[14.5px] text-yb-nav-more"}>
+      <button type="button" className={compact ? "group/status-parent flex cursor-not-allowed items-center gap-[5px] px-1 py-[6px] text-[12px] text-yb-nav-more" : "group/status-parent flex cursor-not-allowed items-center gap-[5px] px-1 pb-3 text-[14.5px] text-yb-nav-more"} aria-disabled="true">
         More ▾
+        <ImplementationStatusIcon
+          label="Not implemented"
+          description="The additional navigation menu is not available yet."
+          withinInteractiveControl
+        />
       </button>
     </div>
   );

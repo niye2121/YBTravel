@@ -64,6 +64,7 @@ export const updateClientSchema = z.object({
   secondaryRepId: z.number().int().positive().nullable(),
   bookingFeeGroupId: z.number().int().positive(),
   stage: z.string().trim().min(1, "Onboarding stage is required").max(50),
+  onboardingTransitionReason: z.string().trim().max(500).nullable().optional(),
 });
 export type UpdateClientInput = z.infer<typeof updateClientSchema>;
 

@@ -2,8 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, Outlet, createFileRoute, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppHeader } from "../components/AppShell/AppHeader";
-import { FilterStrip } from "../components/AppShell/FilterStrip";
+import { FilterStrip, type FilterOption } from "../components/AppShell/FilterStrip";
 import { PrimaryButton, SecondaryButton } from "../components/AppShell/buttons";
+import { ImplementationStatusIcon } from "../components/ImplementationStatusIcon";
 import { COLS, FILTERS, GROUPS, money, type RequestGroup } from "../data/requestsData";
 import { useAuth } from "../lib/AuthContext";
 import { requestsApi, type TravelRequestRecord } from "../lib/api";
@@ -91,10 +92,14 @@ function RequestsPage() {
   const liveRequests = requestsQuery.data ?? [];
   const assignedToMeRequests = liveRequests.filter((request) => request.assignedUserId === user?.id);
   const unassignedRequests = liveRequests.filter((request) => request.assignedUserId === null);
-  const workflowFilters: [string, number][] = FILTERS.map(([label, count]) =>
-    label === "Unassigned" ? [label, unassignedRequests.length] : [label, count],
+  const previewFilterStatus = {
+    label: "Not implemented",
+    description: "This workflow view currently shows demonstration data, not live requests.",
+  };
+  const workflowFilters: FilterOption[] = FILTERS.map(([label, count]) =>
+    label === "Unassigned" ? [label, unassignedRequests.length] : [label, count, previewFilterStatus],
   );
-  const requestFilters: [string, number][] = [
+  const requestFilters: FilterOption[] = [
     [ALL_REQUESTS, liveRequests.length],
     [ASSIGNED_TO_ME, assignedToMeRequests.length],
     ...workflowFilters,
@@ -181,10 +186,10 @@ function RequestsPage() {
         </div>
         <div className="flex-1" />
         <div className="flex items-center gap-[10px]">
-          <PrimaryButton>+ New Request</PrimaryButton>
-          <SecondaryButton>Assign…</SecondaryButton>
-          <SecondaryButton>Print</SecondaryButton>
-          <SecondaryButton>Export ▾</SecondaryButton>
+          <PrimaryButton className="group/status-parent flex items-center gap-[7px]" aria-disabled="true">+ New Request <ImplementationStatusIcon label="Coming in Phase 2" description="Create requests from Inbox for now. Standalone request creation is not implemented yet." withinInteractiveControl /></PrimaryButton>
+          <SecondaryButton className="group/status-parent flex items-center gap-[7px]" aria-disabled="true">Assign… <ImplementationStatusIcon label="Not implemented here" description="Assignment is available from an individual request, not as a bulk action yet." withinInteractiveControl /></SecondaryButton>
+          <SecondaryButton className="group/status-parent flex items-center gap-[7px]" aria-disabled="true">Print <ImplementationStatusIcon label="Not implemented" description="Printing this queue is not available yet." withinInteractiveControl /></SecondaryButton>
+          <SecondaryButton className="group/status-parent flex items-center gap-[7px]" aria-disabled="true">Export ▾ <ImplementationStatusIcon label="Not implemented" description="Request export is not available yet." withinInteractiveControl /></SecondaryButton>
         </div>
       </div>
 
@@ -214,12 +219,8 @@ function RequestsPage() {
               <option key={l}>{l}</option>
             ))}
           </select>
-          <a href="#" onClick={(e) => e.preventDefault()} className="text-[13px] text-yb-green underline">
-            Edit
-          </a>
-          <a href="#" onClick={(e) => e.preventDefault()} className="text-[13px] text-yb-green underline">
-            Create New View
-          </a>
+          <span className="flex items-center gap-[5px] text-[13px] text-yb-muted3">Edit <ImplementationStatusIcon label="Not implemented" description="Custom view editing is not available yet." /></span>
+          <span className="flex items-center gap-[5px] text-[13px] text-yb-muted3">Create New View <ImplementationStatusIcon label="Not implemented" description="Creating custom request views is not available yet." /></span>
 
           <div className="flex-1" />
 

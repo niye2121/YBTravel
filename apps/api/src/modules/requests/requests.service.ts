@@ -4,6 +4,18 @@ import type { Pool } from "pg";
 import { recordAudit } from "../../database/audit";
 import { PG_POOL } from "../../database/database.module";
 import { AssignmentRoutingService, type AssignmentRecommendation } from "../assignment-routing/assignment-routing.service";
+import { OnboardingService } from "../clients/onboarding.service";
+
+export type RequestDetailsInput = {
+  passengerCount: number | null;
+  origin: string | null;
+  destination: string | null;
+  departureDateText: string | null;
+  returnDateText: string | null;
+  cabinClass: string | null;
+  flexibility: string | null;
+  specialRequests: string | null;
+};
 
 export type TravelRequestRecord = {
   id: number;
@@ -11,6 +23,14 @@ export type TravelRequestRecord = {
   clientId: number;
   clientName: string;
   tripSummary: string;
+  passengerCount: number | null;
+  origin: string | null;
+  destination: string | null;
+  departureDateText: string | null;
+  returnDateText: string | null;
+  cabinClass: string | null;
+  flexibility: string | null;
+  specialRequests: string | null;
   requestTypeId: number;
   requestTypeCode: string;
   requestTypeName: string;
@@ -46,6 +66,14 @@ type RequestRow = {
   client_id: number;
   client_name: string;
   trip_summary: string;
+  passenger_count: number | null;
+  origin: string | null;
+  destination: string | null;
+  departure_date_text: string | null;
+  return_date_text: string | null;
+  cabin_class: string | null;
+  flexibility: string | null;
+  special_requests: string | null;
   request_type_id: number;
   request_type_code: string;
   request_type_name: string;
@@ -76,6 +104,14 @@ function toRequest(row: RequestRow): TravelRequestRecord {
     clientId: row.client_id,
     clientName: row.client_name,
     tripSummary: row.trip_summary,
+    passengerCount: row.passenger_count,
+    origin: row.origin,
+    destination: row.destination,
+    departureDateText: row.departure_date_text,
+    returnDateText: row.return_date_text,
+    cabinClass: row.cabin_class,
+    flexibility: row.flexibility,
+    specialRequests: row.special_requests,
     requestTypeId: row.request_type_id,
     requestTypeCode: row.request_type_code,
     requestTypeName: row.request_type_name,
@@ -102,7 +138,9 @@ function toRequest(row: RequestRow): TravelRequestRecord {
 
 const SELECT_REQUESTS = `
   SELECT r.id, r.request_number, r.client_id, c.name AS client_name,
-         r.trip_summary, r.request_type_id, rt.code AS request_type_code,
+         r.trip_summary, r.passenger_count, r.origin, r.destination,
+         r.departure_date_text, r.return_date_text, r.cabin_class, r.flexibility,
+         r.special_requests, r.request_type_id, rt.code AS request_type_code,
          rt.name AS request_type_name, r.request_status_id,
          rs.code AS request_status_code, rs.name AS request_status_name,
          r.urgency_level_id, ul.code AS urgency_code, ul.name AS urgency_name,
@@ -131,6 +169,7 @@ export class RequestsService {
   constructor(
     @Inject(PG_POOL) private readonly pool: Pool,
     @Optional() private readonly routing?: AssignmentRoutingService,
+    @Optional() private readonly onboarding?: OnboardingService,
   ) {}
 
   async list(): Promise<TravelRequestRecord[]> {
@@ -145,6 +184,48 @@ export class RequestsService {
     const row = result.rows[0];
     if (!row) throw new NotFoundException("Travel request not found");
     return toRequest(row);
+  }
+
+  getInformationStatus(id: number) {
+    if (!this.onboarding) throw new Error("Information completeness is unavailable");
+    return this.onboarding.getRequestStatus(id);
+  }
+
+  reviewInformation(id: number, requirementFieldId: number, actorUserId: number) {
+    if (!this.onboarding) throw new Error("Information completeness is unavailable");
+    return this.onboarding.reviewRequestField(id, requirementFieldId, actorUserId);
+  }
+
+  async updateDetails(id: number, input: RequestDetailsInput, actorUserId: number): Promise<TravelRequestRecord> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const beforeResult = await client.query<RequestRow>(`${SELECT_REQUESTS} WHERE r.id = $1 FOR UPDATE OF r`, [id]);
+      const beforeRow = beforeResult.rows[0];
+      if (!beforeRow) throw new NotFoundException("Travel request not found");
+      const clean = (value: string | null) => value?.trim() || null;
+      await client.query(
+        `UPDATE travel_requests SET passenger_count = $2, origin = $3, destination = $4,
+             departure_date_text = $5, return_date_text = $6, cabin_class = $7,
+             flexibility = $8, special_requests = $9, updated_at = now()
+         WHERE id = $1`,
+        [id, input.passengerCount, clean(input.origin), clean(input.destination),
+         clean(input.departureDateText), clean(input.returnDateText), clean(input.cabinClass),
+         clean(input.flexibility), clean(input.specialRequests)],
+      );
+      const afterResult = await client.query<RequestRow>(`${SELECT_REQUESTS} WHERE r.id = $1`, [id]);
+      const afterRow = afterResult.rows[0];
+      if (!afterRow) throw new NotFoundException("Travel request not found");
+      const before = toRequest(beforeRow); const after = toRequest(afterRow);
+      await recordAudit(client, actorUserId, "travel_request.details_updated", "travel_request", id, before, after);
+      await client.query("COMMIT");
+      return after;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async listAssignableStaff(): Promise<AssignableStaffRecord[]> {
@@ -280,6 +361,7 @@ export class RequestsService {
     requestTypeId?: number,
     urgencyLevelId?: number,
     sourceDraftIntakeId?: number,
+    details?: Partial<RequestDetailsInput>,
   ): Promise<TravelRequestRecord> {
     const client = await this.pool.connect();
     try {
@@ -311,14 +393,18 @@ export class RequestsService {
       const inserted = await client.query<{ id: number }>(
         `INSERT INTO travel_requests
            (client_id, trip_summary, status, request_type_id, request_status_id,
-            urgency_level_id, response_due_at, service_due_at, created_by, source_draft_intake_id)
+            urgency_level_id, response_due_at, service_due_at, created_by, source_draft_intake_id,
+            passenger_count, origin, destination, departure_date_text, return_date_text,
+            cabin_class, flexibility, special_requests)
          VALUES ($1, $2, 'new', $3, $4, $5,
                  CASE WHEN $6::int IS NULL THEN NULL ELSE now() + make_interval(mins => $6) END,
                  CASE WHEN $7::int IS NULL THEN NULL ELSE now() + make_interval(mins => $7) END,
-                 $8, $9) RETURNING id`,
+                 $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id`,
         [clientId, tripSummary, typeId, statusId, urgency.id,
          urgency.response_deadline_minutes, urgency.service_deadline_minutes, actorUserId,
-         sourceDraftIntakeId ?? null],
+         sourceDraftIntakeId ?? null, details?.passengerCount ?? null, details?.origin ?? null,
+         details?.destination ?? null, details?.departureDateText ?? null, details?.returnDateText ?? null,
+         details?.cabinClass ?? null, details?.flexibility ?? null, details?.specialRequests ?? null],
       );
       const id = inserted.rows[0]?.id;
       if (!id) throw new Error("Failed to create travel request");

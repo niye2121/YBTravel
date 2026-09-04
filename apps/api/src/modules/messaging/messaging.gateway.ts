@@ -40,7 +40,7 @@ export class MessagingGateway implements OnGatewayInit {
     });
   }
 
-  emitStatus(payload: { status: ConnectionStatus; qr: string | null; phoneNumber: string | null }): void {
+  emitStatus(payload: { accountId: number; status: ConnectionStatus; qr: string | null; phoneNumber: string | null }): void {
     this.server.emit("connection:status", payload);
   }
 

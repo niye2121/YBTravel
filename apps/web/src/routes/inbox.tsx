@@ -2,21 +2,31 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "react-qr-code";
+import { z } from "zod";
 import { AppHeader } from "../components/AppShell/AppHeader";
 import { Panel } from "../components/AppShell/Panel";
 import { PrimaryButton, SecondaryButton } from "../components/AppShell/buttons";
 import { WhatsAppSubnav } from "../components/AppShell/WhatsAppSubnav";
 import {
+  messageTemplatesApi,
   messagingApi,
   requestWorkflowSettingsApi,
+  systemSettingsApi,
   type ConversationSummary,
   type DraftIntakeRecord,
   type UpdateDraftIntakeInput,
 } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
 import { getSocket } from "../lib/socket";
+import { useAuth } from "../lib/AuthContext";
 
-export const Route = createFileRoute("/inbox")({ component: InboxPage });
+export const Route = createFileRoute("/inbox")({
+  validateSearch: z.object({
+    conversationId: z.coerce.number().int().positive().optional(),
+    accountId: z.coerce.number().int().positive().optional(),
+  }),
+  component: InboxPage,
+});
 
 type ConversationFilter = "all" | "unread" | "groups";
 
@@ -45,18 +55,209 @@ function displayPhone(value: string | null): string {
   return value.startsWith("+") ? value : `+${value}`;
 }
 
+function VoiceNotePlayer({ messageId, available }: { messageId: number; available: boolean }) {
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => () => {
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+  }, [audioUrl]);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const blob = await messagingApi.getMessageAudio(messageId);
+      setAudioUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return URL.createObjectURL(blob);
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load this voice note");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!available) return <div className="text-[12px] italic opacity-80">Voice note unavailable</div>;
+  return (
+    <div className="min-w-[220px]">
+      {audioUrl ? (
+        <audio controls preload="metadata" src={audioUrl} className="h-[34px] w-full max-w-[300px]" />
+      ) : (
+        <button type="button" onClick={load} disabled={loading} className="border border-current px-[10px] py-[5px] text-[11.5px] font-bold opacity-90 hover:opacity-100 disabled:opacity-60">
+          {loading ? "Loading voice note…" : "▶ Play voice note"}
+        </button>
+      )}
+      {error && <div role="alert" className="mt-[4px] text-[10.5px] text-yb-red">{error}</div>}
+    </div>
+  );
+}
+
+function VoiceNoteComposer({
+  disabled,
+  onSend,
+}: {
+  disabled: boolean;
+  onSend: (audio: Blob, durationSeconds: number | null) => Promise<void>;
+}) {
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<number | null>(null);
+  const recordingStartedAtRef = useRef<number | null>(null);
+  const preparedUrlRef = useRef<string | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [prepared, setPrepared] = useState<{ blob: Blob; url: string; durationSeconds: number | null } | null>(null);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const releaseRecorder = () => {
+    if (timerRef.current !== null) window.clearInterval(timerRef.current);
+    timerRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    recorderRef.current = null;
+    setRecording(false);
+  };
+
+  const clearPrepared = () => {
+    if (preparedUrlRef.current) URL.revokeObjectURL(preparedUrlRef.current);
+    preparedUrlRef.current = null;
+    setPrepared(null);
+  };
+
+  useEffect(() => () => {
+    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+    releaseRecorder();
+    if (preparedUrlRef.current) URL.revokeObjectURL(preparedUrlRef.current);
+    preparedUrlRef.current = null;
+  }, []);
+
+  const prepareBlob = (blob: Blob, durationSeconds: number | null) => {
+    clearPrepared();
+    if (!blob.size) {
+      setError("The recording is empty. Please try again.");
+      return;
+    }
+    if (blob.size > 10 * 1024 * 1024) {
+      setError("Voice notes must be 10 MB or smaller.");
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    preparedUrlRef.current = url;
+    setPrepared({ blob, durationSeconds, url });
+  };
+
+  const startRecording = async () => {
+    setError(null);
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setError("Microphone recording requires localhost or HTTPS. You can upload an audio recording instead.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"]
+        .find((candidate) => MediaRecorder.isTypeSupported(candidate));
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      chunksRef.current = [];
+      streamRef.current = stream;
+      recorderRef.current = recorder;
+      recordingStartedAtRef.current = Date.now();
+      setRecordingSeconds(0);
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) chunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        const durationSeconds = recordingStartedAtRef.current === null
+          ? null
+          : Math.max(1, Math.round((Date.now() - recordingStartedAtRef.current) / 1000));
+        recordingStartedAtRef.current = null;
+        prepareBlob(new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" }), durationSeconds);
+        releaseRecorder();
+      };
+      recorder.start(250);
+      setRecording(true);
+      timerRef.current = window.setInterval(() => {
+        setRecordingSeconds((current) => {
+          if (current >= 119 && recorder.state === "recording") recorder.stop();
+          return current + 1;
+        });
+      }, 1000);
+    } catch (caught) {
+      releaseRecorder();
+      setError(caught instanceof Error && caught.name === "NotAllowedError"
+        ? "Microphone permission was denied. Allow it in the browser or upload an audio recording."
+        : "The microphone could not be started.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+  };
+
+  const send = async () => {
+    if (!prepared) return;
+    setSending(true);
+    setError(null);
+    try {
+      await onSend(prepared.blob, prepared.durationSeconds);
+      clearPrepared();
+      setRecordingSeconds(0);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not send the voice note");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="mb-[7px] border border-yb-line-row bg-[#f7f8f5] px-[8px] py-[7px]">
+      <div className="flex flex-wrap items-center gap-[7px]">
+        <button type="button" disabled={disabled || sending} onClick={recording ? stopRecording : startRecording} className={`border px-[10px] py-[5px] text-[11.5px] font-bold ${recording ? "border-yb-red bg-[#fff3f1] text-yb-red" : "border-yb-line-btn bg-white text-yb-ink2 hover:bg-yb-row-hover"}`}>
+          {recording ? `■ Stop · ${recordingSeconds}s` : "● Record voice note"}
+        </button>
+        <label className="cursor-pointer border border-yb-line-btn bg-white px-[10px] py-[5px] text-[11.5px] text-yb-ink2 hover:bg-yb-row-hover">
+          Upload audio
+          <input type="file" accept="audio/webm,audio/ogg,audio/mp4,audio/mpeg,audio/wav" className="sr-only" disabled={disabled || recording || sending} onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) prepareBlob(file, null);
+            event.currentTarget.value = "";
+          }} />
+        </label>
+        {prepared && <audio controls preload="metadata" src={prepared.url} className="h-[32px] min-w-[190px] flex-1" />}
+        {prepared && <button type="button" disabled={sending || disabled} onClick={send} className="border border-yb-green bg-yb-green px-[11px] py-[5px] text-[11.5px] font-bold text-white disabled:opacity-60">{sending ? "Sending…" : "Send voice note"}</button>}
+        {prepared && <button type="button" disabled={sending} onClick={clearPrepared} className="px-[5px] py-[4px] text-[11px] text-yb-muted3 underline">Cancel</button>}
+      </div>
+      {error && <div role="alert" className="mt-[5px] text-[11px] text-yb-red">{error}</div>}
+    </div>
+  );
+}
+
 function InboxPage() {
   const queryClient = useQueryClient();
+  const search = Route.useSearch();
+  const { isAdmin } = useAuth();
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(search.conversationId ?? null);
   const [reply, setReply] = useState("");
+  const [templateId, setTemplateId] = useState("");
+  const [templateWarning, setTemplateWarning] = useState<string | null>(null);
   const [conversationSearch, setConversationSearch] = useState("");
   const [conversationFilter, setConversationFilter] = useState<ConversationFilter>("all");
   const [readConversationIds, setReadConversationIds] = useState<Set<number>>(() => new Set());
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
 
   const statusQuery = useQuery({
     queryKey: ["messaging", "status"],
     queryFn: messagingApi.getStatus,
+    refetchInterval: 5000,
+  });
+  const accountsQuery = useQuery({
+    queryKey: ["messaging", "accounts"],
+    queryFn: messagingApi.listAccounts,
     refetchInterval: 5000,
   });
   const conversationsQuery = useQuery({
@@ -68,11 +269,36 @@ function InboxPage() {
     queryKey: ["messaging", "groups"],
     queryFn: messagingApi.listGroups,
   });
+  const systemSettingsQuery = useQuery({
+    queryKey: ["system-settings"],
+    queryFn: systemSettingsApi.get,
+    enabled: isAdmin,
+  });
+  const templatesQuery = useQuery({ queryKey: ["message-templates", "active"], queryFn: messageTemplatesApi.listActive });
   const reconnectMutation = useMutation({
-    mutationFn: messagingApi.reconnect,
+    mutationFn: () => messagingApi.reconnectAccount(selectedAccountId as number),
     onSuccess: (nextStatus) => {
       queryClient.setQueryData(["messaging", "status"], nextStatus);
+      queryClient.invalidateQueries({ queryKey: ["messaging", "accounts"] });
       queryClient.invalidateQueries({ queryKey: ["messaging", "status"] });
+    },
+  });
+  const disconnectMutation = useMutation({
+    mutationFn: () => messagingApi.disconnectAccount(selectedAccountId as number),
+    onSuccess: (nextStatus) => {
+      queryClient.setQueryData(["messaging", "status"], nextStatus);
+      queryClient.invalidateQueries({ queryKey: ["messaging", "accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["messaging", "status"] });
+    },
+  });
+  const resetTestDataMutation = useMutation({
+    mutationFn: systemSettingsApi.resetTestData,
+    onSuccess: async () => {
+      queryClient.setQueryData(["messaging", "conversations"], []);
+      queryClient.setQueryData(["messaging", "groups"], []);
+      setSelectedId(null);
+      setReadConversationIds(new Set());
+      await queryClient.invalidateQueries();
     },
   });
   const messagesQuery = useQuery({
@@ -94,8 +320,30 @@ function InboxPage() {
     },
   });
 
+  const sendVoiceNoteMutation = useMutation({
+    mutationFn: ({ audio, durationSeconds }: { audio: Blob; durationSeconds: number | null }) =>
+      messagingApi.sendVoiceNote(selectedId as number, audio, durationSeconds),
+    onSuccess: () => {
+      if (selectedId !== null) {
+        queryClient.invalidateQueries({
+          queryKey: ["messaging", "conversations", selectedId, "messages"],
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["messaging", "conversations"] });
+    },
+  });
+  const renderTemplateMutation = useMutation({
+    mutationFn: () => messageTemplatesApi.render(Number(templateId), selectedId as number),
+    onSuccess: (result) => {
+      setReply(result.renderedText);
+      setTemplateWarning(result.missingVariables.length
+        ? `Complete these linked details before sending: ${result.missingVariables.join(", ").replaceAll("_", " ")}`
+        : null);
+    },
+  });
+
   const startConversationMutation = useMutation({
-    mutationFn: (phoneNumber: string) => messagingApi.startConversation(phoneNumber),
+    mutationFn: (phoneNumber: string) => messagingApi.startConversation(phoneNumber, selectedAccountId ?? undefined),
     onSuccess: async ({ id }) => {
       setSelectedId(id);
       setConversationSearch("");
@@ -105,7 +353,10 @@ function InboxPage() {
 
   useEffect(() => {
     const socket = getSocket();
-    const onStatus = () => queryClient.invalidateQueries({ queryKey: ["messaging", "status"] });
+    const onStatus = () => {
+      queryClient.invalidateQueries({ queryKey: ["messaging", "status"] });
+      queryClient.invalidateQueries({ queryKey: ["messaging", "accounts"] });
+    };
     const onNewMessage = (payload: { conversationId: number }) => {
       queryClient.invalidateQueries({ queryKey: ["messaging", "conversations"] });
       queryClient.invalidateQueries({
@@ -131,6 +382,24 @@ function InboxPage() {
     };
   }, [queryClient]);
 
+  useEffect(() => { setTemplateId(""); setTemplateWarning(null); }, [selectedId]);
+
+  useEffect(() => {
+    if (selectedAccountId !== null || !accountsQuery.data?.length) return;
+    setSelectedAccountId((accountsQuery.data.find((account) => account.isPrimary) ?? accountsQuery.data[0]!).id);
+  }, [accountsQuery.data, selectedAccountId]);
+
+  useEffect(() => {
+    if (search.conversationId !== undefined) setSelectedId(search.conversationId);
+    if (search.accountId !== undefined) setSelectedAccountId(search.accountId);
+  }, [search.accountId, search.conversationId]);
+
+  useEffect(() => {
+    if (search.conversationId === undefined || search.accountId !== undefined) return;
+    const linkedConversation = conversationsQuery.data?.find((conversation) => conversation.id === search.conversationId);
+    if (linkedConversation) setSelectedAccountId(linkedConversation.accountId);
+  }, [conversationsQuery.data, search.accountId, search.conversationId]);
+
   useEffect(() => {
     if (selectedId !== null) {
       setReadConversationIds((current) => {
@@ -143,25 +412,27 @@ function InboxPage() {
   }, [selectedId]);
 
   useEffect(() => {
-    if (selectedId === null && conversationsQuery.data?.length) {
-      setSelectedId(conversationsQuery.data[0]!.id);
+    const first = conversationsQuery.data?.find((conversation) => selectedAccountId === null || conversation.accountId === selectedAccountId);
+    if (selectedId === null && first) {
+      setSelectedId(first.id);
     }
-  }, [conversationsQuery.data, selectedId]);
+  }, [conversationsQuery.data, selectedAccountId, selectedId]);
 
-  const status = statusQuery.data;
+  const status = accountsQuery.data?.find((account) => account.id === selectedAccountId) ?? statusQuery.data;
   const conversations = conversationsQuery.data ?? [];
   const groups = groupsQuery.data ?? [];
   const messages = messagesQuery.data ?? [];
   const selectedConversation = conversations.find((conversation) => conversation.id === selectedId) ?? null;
   const selectedGroup = groups.find((group) => group.conversationId === selectedId) ?? null;
   const normalizedSearch = conversationSearch.trim().toLowerCase();
+  const accountConversations = selectedAccountId === null ? conversations : conversations.filter((conversation) => conversation.accountId === selectedAccountId);
   const searchedConversations = normalizedSearch
-    ? conversations.filter((conversation) =>
+    ? accountConversations.filter((conversation) =>
         [conversation.displayName, conversation.phoneNumber]
           .filter((value): value is string => Boolean(value))
           .some((value) => value.toLowerCase().includes(normalizedSearch)),
       )
-    : conversations;
+    : accountConversations;
   const filteredConversations = searchedConversations.filter((conversation) => {
     if (conversationFilter === "groups") {
       return groups.some((group) => group.conversationId === conversation.id);
@@ -171,7 +442,7 @@ function InboxPage() {
     }
     return true;
   });
-  const unreadCount = conversations.filter(
+  const unreadCount = accountConversations.filter(
     (conversation) => Boolean(conversation.lastMessageBody) && !readConversationIds.has(conversation.id),
   ).length;
   const phoneDigits = conversationSearch.replace(/[^0-9]/g, "").replace(/^00/, "");
@@ -213,6 +484,49 @@ function InboxPage() {
           </div>
         </div>
         <div className="flex-1" />
+        <label className="flex h-[29px] items-center gap-[7px] border border-yb-line-btn bg-white px-[9px] text-[11.5px] font-bold text-yb-ink2">
+          <span>Account</span>
+          <select
+            aria-label="WhatsApp account"
+            value={selectedAccountId ?? ""}
+            onChange={(event) => { setSelectedAccountId(Number(event.target.value)); setSelectedId(null); }}
+            className="bg-white text-[11.5px] font-normal outline-none"
+          >
+            {(accountsQuery.data ?? []).map((account) => (
+              <option key={account.id} value={account.id}>{account.label}{account.phoneNumber ? ` · ${displayPhone(account.phoneNumber)}` : ""}</option>
+            ))}
+          </select>
+        </label>
+        {isAdmin && systemSettingsQuery.data?.testDataDeletionEnabled && (
+          <SecondaryButton
+            className="h-[29px] rounded-none border-yb-red bg-yb-red px-[14px] py-[6px] text-[12px] text-white hover:bg-[#7f2117]"
+            disabled={resetTestDataMutation.isPending}
+            onClick={() => {
+              const confirmation = window.prompt(
+                "This permanently deletes all operational test data, including WhatsApp messages, conversations, groups, requests, clients, travellers, assignments, and notifications. Users, settings, audit history, and the WhatsApp connection are preserved.\n\nType DELETE ALL TEST DATA to continue.",
+              );
+              if (confirmation === "DELETE ALL TEST DATA") {
+                resetTestDataMutation.mutate("DELETE ALL TEST DATA");
+              }
+            }}
+          >
+            {resetTestDataMutation.isPending ? "Deleting test data…" : "Delete all test data"}
+          </SecondaryButton>
+        )}
+        {isAdmin && status?.status === "connected" && (
+          <SecondaryButton
+            className="h-[29px] rounded-none border-yb-red px-[14px] py-[6px] text-[12px] text-yb-red hover:bg-[#fff3f1]"
+            disabled={disconnectMutation.isPending}
+            onClick={() => {
+              const confirmed = window.confirm(
+                `Disconnect ${status.label}? Its messages stay in the database, but this number will be logged out and require a new QR code. Other WhatsApp accounts are not affected.`,
+              );
+              if (confirmed) disconnectMutation.mutate();
+            }}
+          >
+            {disconnectMutation.isPending ? "Disconnecting…" : "Disconnect WhatsApp"}
+          </SecondaryButton>
+        )}
         <Link to="/whatsapp-groups" className="border border-yb-line-btn bg-white px-[14px] py-[6px] text-[12px] text-yb-ink2 hover:bg-yb-hover-btn">
           Managed Groups
         </Link>
@@ -220,6 +534,20 @@ function InboxPage() {
       </div>
 
       <div className="px-[16px] pb-[24px]">
+        {(disconnectMutation.isError || resetTestDataMutation.isError) && (
+          <div role="alert" className="mb-[10px] border border-yb-red bg-[#fff3f1] px-[12px] py-[8px] text-[12px] text-yb-red">
+            {resetTestDataMutation.error instanceof Error
+              ? resetTestDataMutation.error.message
+              : disconnectMutation.error instanceof Error
+              ? disconnectMutation.error.message
+              : "Could not complete the administrator action"}
+          </div>
+        )}
+        {resetTestDataMutation.isSuccess && (
+          <div role="status" className="mb-[10px] border border-yb-green bg-yb-row-hover px-[12px] py-[8px] text-[12px] font-bold text-yb-green">
+            Test data deleted. The deletion control has been disabled automatically in Setup.
+          </div>
+        )}
         {statusQuery.isError ? (
           <Panel title="WHATSAPP SERVICE UNAVAILABLE" right="the saved WhatsApp session has not been changed" pad>
             <div className="flex flex-col items-center gap-[12px] py-6 text-center">
@@ -261,12 +589,12 @@ function InboxPage() {
           </Panel>
           </div>
           )}
-          <div className="grid h-[700px] grid-cols-[minmax(230px,280px)_minmax(340px,1fr)_minmax(390px,430px)] border border-yb-line bg-white">
-            <section className="flex min-w-0 flex-col border-r border-yb-line-soft">
+          <div className="grid h-[calc(100vh-190px)] min-h-[520px] max-h-[700px] grid-cols-[minmax(230px,280px)_minmax(340px,1fr)_minmax(390px,430px)] overflow-hidden border border-yb-line bg-white">
+            <section className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-yb-line-soft">
               <div className="flex items-center border-b border-yb-line-soft bg-yb-panel-head px-[10px] py-[7px]">
                 <div className="text-[10.5px] font-bold tracking-[1.2px] text-yb-panel-head-text">CONVERSATIONS</div>
                 <div className="flex-1" />
-                <div className="text-[11px] text-yb-muted3">{conversations.length} open</div>
+                <div className="text-[11px] text-yb-muted3">{accountConversations.length} open</div>
               </div>
               <div className="border-b border-yb-line-row p-[10px]">
                 <div className="flex gap-[7px]">
@@ -290,7 +618,7 @@ function InboxPage() {
                 </div>
                 <div className="mt-[7px] flex gap-[6px]">
                   {([
-                    ["all", "All", conversations.length],
+                    ["all", "All", accountConversations.length],
                     ["unread", "Unread", unreadCount],
                     ["groups", "Groups", groups.length],
                   ] as const).map(([value, label, count]) => (
@@ -311,7 +639,7 @@ function InboxPage() {
                 )}
               </div>
 
-              <div className="flex-1 overflow-y-auto">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
                 {filteredConversations.map((conversation) => {
                   const active = conversation.id === selectedId;
                   const managedGroup = groups.find((group) => group.conversationId === conversation.id);
@@ -343,16 +671,16 @@ function InboxPage() {
                     </button>
                   );
                 })}
-                {conversations.length === 0 && !normalizedSearch && (
+                {accountConversations.length === 0 && !normalizedSearch && (
                   <div className="px-[14px] py-6 text-center text-[13px] text-yb-muted3">No conversations yet. Enter a WhatsApp number above to start one, or wait for an incoming message.</div>
                 )}
-                {conversations.length > 0 && filteredConversations.length === 0 && (
+                {accountConversations.length > 0 && filteredConversations.length === 0 && (
                   <div className="px-[14px] py-6 text-center text-[13px] text-yb-muted3">No conversations match this search or filter.</div>
                 )}
               </div>
             </section>
 
-            <section className="flex min-w-0 flex-col bg-[#f7f8f5]">
+            <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#f7f8f5]">
               {selectedConversation ? (
                 <>
                   <div className="flex min-h-[46px] flex-wrap items-center gap-[10px] border-b border-yb-line-soft bg-white px-[14px] py-[8px]">
@@ -361,10 +689,10 @@ function InboxPage() {
                       <div className="truncate text-[13px] font-bold">{selectedTitle}</div>
                       <div className="truncate text-[11px] text-yb-muted3">
                         {selectedGroup
-                          ? `${displayPhone(selectedConversation.phoneNumber)} · ${selectedGroup.clientName}`
+                          ? `${selectedConversation.accountLabel} · ${displayPhone(selectedConversation.phoneNumber)} · ${selectedGroup.clientName}`
                           : selectedConversation.clientName
-                            ? `${displayPhone(selectedConversation.phoneNumber)} · ${selectedConversation.clientName}`
-                            : displayPhone(selectedConversation.phoneNumber)}
+                            ? `${selectedConversation.accountLabel} · ${displayPhone(selectedConversation.phoneNumber)} · ${selectedConversation.clientName}`
+                            : `${selectedConversation.accountLabel} · ${displayPhone(selectedConversation.phoneNumber)}`}
                       </div>
                     </div>
                     <Link to="/requests" className="border border-yb-line-btn bg-white px-[11px] py-[5px] text-[11.5px] text-yb-ink2 hover:bg-yb-hover-btn">
@@ -399,20 +727,50 @@ function InboxPage() {
                       </Link>
                     </div>
                   )}
-                  <div className="flex flex-1 flex-col gap-[8px] overflow-y-auto px-[16px] py-[14px]">
-                    {messages.length > 0 && <div className="self-center rounded-[10px] bg-[#e9ece5] px-[10px] py-[2px] text-[10px] font-bold tracking-[1px] text-yb-muted4">TODAY</div>}
-                    {messages.map((message) => (
-                      <div key={message.id} className={`max-w-[62%] border px-[10px] pt-[7px] pb-[5px] ${message.direction === "outbound" ? "ml-auto rounded-[8px_2px_8px_8px] border-yb-green-darker bg-yb-green text-white" : "rounded-[2px_8px_8px_8px] border-yb-line-soft bg-white text-yb-ink"}`}>
-                        <div className="whitespace-pre-wrap text-[13px] leading-[1.45]">{message.body}</div>
-                        <div className={`mt-[3px] flex items-center justify-end gap-[5px] text-[10px] ${message.direction === "outbound" ? "text-[#bfd2c7]" : "text-yb-muted4"}`}>
-                          <span>{formatTime(message.createdAt)}</span>
-                          {message.direction === "outbound" && <span>✓✓</span>}
+                  <div
+                    aria-label="Message history"
+                    className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-[16px] py-[14px] [scrollbar-gutter:stable]"
+                  >
+                    <div className="flex min-h-full flex-col gap-[8px]">
+                      {messages.length > 0 && <div className="self-center rounded-[10px] bg-[#e9ece5] px-[10px] py-[2px] text-[10px] font-bold tracking-[1px] text-yb-muted4">TODAY</div>}
+                      {messages.map((message) => (
+                        <div key={message.id} className={`max-w-[62%] border px-[10px] pt-[7px] pb-[5px] ${message.direction === "outbound" ? "ml-auto rounded-[8px_2px_8px_8px] border-yb-green-darker bg-yb-green text-white" : "rounded-[2px_8px_8px_8px] border-yb-line-soft bg-white text-yb-ink"}`}>
+                          {message.messageType === "audio" ? (
+                            <VoiceNotePlayer messageId={message.id} available={message.hasAudio} />
+                          ) : (
+                            <div className="whitespace-pre-wrap text-[13px] leading-[1.45]">{message.body}</div>
+                          )}
+                          <div className={`mt-[3px] flex items-center justify-end gap-[5px] text-[10px] ${message.direction === "outbound" ? "text-[#bfd2c7]" : "text-yb-muted4"}`}>
+                            <span>{formatTime(message.createdAt)}</span>
+                            {message.direction === "outbound" && (
+                              <span title="Accepted by WhatsApp; recipient delivery is not yet confirmed">✓</span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                    {messages.length === 0 && <div className="flex flex-1 items-center justify-center text-[13px] text-yb-muted3">No messages yet. Send the first message below.</div>}
+                      ))}
+                      {messages.length === 0 && <div className="flex flex-1 items-center justify-center text-[13px] text-yb-muted3">No messages yet. Send the first message below.</div>}
+                    </div>
                   </div>
                   <div className="border-t border-yb-line-soft bg-white px-[12px] py-[8px]">
+                    <VoiceNoteComposer
+                      key={selectedConversation.id}
+                      disabled={status?.status !== "connected"}
+                      onSend={async (audio, durationSeconds) => {
+                        await sendVoiceNoteMutation.mutateAsync({ audio, durationSeconds });
+                      }}
+                    />
+                    <div className="mb-[7px] border border-[#ccd3cb] bg-[#f7f8f5] px-[8px] py-[7px]">
+                      <div className="mb-[5px] text-[10px] font-bold uppercase tracking-[0.1em] text-yb-muted4">Approved WhatsApp template</div>
+                      <div className="flex gap-[6px]">
+                        <select aria-label="Approved WhatsApp template" value={templateId} onChange={(event) => { setTemplateId(event.target.value); setTemplateWarning(null); }} className="h-[29px] min-w-0 flex-1 border border-[#8d968e] bg-white px-[7px] text-[11px]">
+                          <option value="">Select a template…</option>
+                          {(templatesQuery.data ?? []).map((template) => <option key={template.id} value={template.id}>{template.purpose} · {template.name} ({template.languageName})</option>)}
+                        </select>
+                        <button type="button" disabled={!templateId || selectedId === null || renderTemplateMutation.isPending} onClick={() => renderTemplateMutation.mutate()} className="border border-yb-green bg-white px-[10px] text-[10.5px] font-bold text-yb-green disabled:opacity-50">{renderTemplateMutation.isPending ? "Preparing…" : "Use template"}</button>
+                      </div>
+                      {templateWarning && <div role="alert" className="mt-[5px] text-[10.5px] font-bold text-[#8a6d10]">{templateWarning}. Unresolved placeholders remain in the draft.</div>}
+                      {renderTemplateMutation.isError && <div role="alert" className="mt-[5px] text-[10.5px] text-yb-red">{renderTemplateMutation.error instanceof Error ? renderTemplateMutation.error.message : "Template could not be prepared"}</div>}
+                    </div>
                     <div className="mb-[7px] flex flex-wrap gap-[6px]">
                       {QUICK_REPLIES.map((quickReply) => (
                         <button key={quickReply.label} type="button" onClick={() => setReply(quickReply.text)} className="border border-[#ccd3cb] bg-[#f2f5f0] px-[9px] py-[3px] text-[11px] text-[#3c443d] hover:bg-[#e7ece5]">
@@ -448,7 +806,7 @@ function InboxPage() {
               )}
             </section>
 
-            <aside className="min-w-0 overflow-y-auto border-l border-yb-line-soft bg-yb-toolbar">
+            <aside className="min-h-0 min-w-0 overflow-y-auto overscroll-contain border-l border-yb-line-soft bg-yb-toolbar [scrollbar-gutter:stable]">
               <div className="border-b border-yb-line-soft bg-yb-panel-head px-[10px] py-[7px] text-[10.5px] font-bold tracking-[1.2px] text-yb-panel-head-text">AI DRAFT INTAKE</div>
               {selectedConversation && (
                 <DraftIntakePanel conversation={selectedConversation} onUseReply={setReply} />

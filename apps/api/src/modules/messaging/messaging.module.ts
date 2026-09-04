@@ -10,6 +10,7 @@ import { MessagingGateway } from "./messaging.gateway";
 import { MessagingService } from "./messaging.service";
 import { WhatsAppGroupsService } from "./whatsapp-groups.service";
 import { DraftIntakesService } from "./draft-intakes.service";
+import { VoiceNoteTranscoder } from "./voice-note-transcoder";
 
 @Module({
   imports: [AuthModule, AiProviderSettingsModule, RequestsModule],
@@ -21,6 +22,7 @@ import { DraftIntakesService } from "./draft-intakes.service";
     MessagingService,
     WhatsAppGroupsService,
     DraftIntakesService,
+    VoiceNoteTranscoder,
   ],
 })
 export class MessagingModule {}

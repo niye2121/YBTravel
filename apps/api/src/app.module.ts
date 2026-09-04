@@ -15,6 +15,7 @@ import { NotificationsModule } from "./modules/notifications/notifications.modul
 import { MessageTemplatesModule } from "./modules/message-templates/message-templates.module";
 import { DatabaseModule } from "./database/database.module";
 import { HealthModule } from "./health/health.module";
+import { EntityRecordsModule } from "./modules/entity-records/entity-records.module";
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { HealthModule } from "./health/health.module";
     AssignmentRoutingModule,
     NotificationsModule,
     MessageTemplatesModule,
+    EntityRecordsModule,
   ],
 })
 export class AppModule {}

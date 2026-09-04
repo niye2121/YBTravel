@@ -13,6 +13,8 @@ import {
 import { z, ZodError } from "zod";
 import { AdminGuard } from "../auth/admin.guard";
 import { AuthGuard, type AuthenticatedRequest } from "../auth/auth.guard";
+import { AllowedRoles } from "../auth/allowed-roles.decorator";
+import { RoleGuard } from "../auth/role.guard";
 import {
   BookingFeesService,
   type BookingFeeGroup,
@@ -58,6 +60,9 @@ const bookingFeeGroupSchema = z
       });
     }
   });
+const requestPassengersSchema = z.object({ passengers: z.array(z.object({
+  travellerId: z.number().int().positive(), category: z.enum(["adult", "child", "infant"]),
+})).min(1).max(100) });
 
 function parseInput(body: unknown): BookingFeeGroupInput {
   try {
@@ -103,5 +108,23 @@ export class BookingFeesController {
     @Body() body: unknown,
   ): Promise<BookingFeeGroup> {
     return this.bookingFeesService.update(id, parseInput(body), request.user.id);
+  }
+
+  @Get("requests/:requestId")
+  requestFee(@Param("requestId", ParseIntPipe) requestId: number) {
+    return this.bookingFeesService.getRequestFee(requestId);
+  }
+
+  @Post("requests/:requestId")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  saveRequestFee(@Param("requestId", ParseIntPipe) requestId: number, @Req() request: AuthenticatedRequest, @Body() body: unknown) {
+    try {
+      const input = requestPassengersSchema.parse(body);
+      return this.bookingFeesService.saveRequestFee(requestId, input.passengers, request.user.id);
+    } catch (error) {
+      if (error instanceof ZodError) throw new BadRequestException(error.flatten().fieldErrors);
+      throw error;
+    }
   }
 }

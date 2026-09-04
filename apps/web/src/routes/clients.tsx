@@ -6,6 +6,7 @@ import type { Client } from "@yb-travel/shared";
 import { AppHeader } from "../components/AppShell/AppHeader";
 import { FilterStrip } from "../components/AppShell/FilterStrip";
 import { PrimaryButton, SecondaryButton } from "../components/AppShell/buttons";
+import { ImplementationStatusIcon } from "../components/ImplementationStatusIcon";
 import { useAuth } from "../lib/AuthContext";
 import { bookingFeesApi, clientsApi } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
@@ -39,6 +40,10 @@ function matchesFilter(client: Client, filter: string, currentUserId: number | u
     default:
       return true;
   }
+}
+
+function phoneDigits(value: string | null | undefined): string {
+  return value?.replace(/\D/g, "") ?? "";
 }
 
 function ClientsPage() {
@@ -102,6 +107,11 @@ function ClientsPage() {
   });
 
   const allClients = clientsQuery.data ?? [];
+  const existingPhoneClient = useMemo(() => {
+    const digits = phoneDigits(phoneNumber);
+    if (!digits) return null;
+    return allClients.find((client) => phoneDigits(client.phoneNumber) === digits) ?? null;
+  }, [allClients, phoneNumber]);
 
   const filters = useMemo<[string, number][]>(
     () => [
@@ -201,7 +211,7 @@ function ClientsPage() {
         <div className="flex-1" />
         <div className="flex items-center gap-[10px]">
           {!showForm && <PrimaryButton onClick={() => setShowForm(true)}>+ New Client</PrimaryButton>}
-          <SecondaryButton className="h-[30px] px-[14px] text-[12px]">Export ▾</SecondaryButton>
+          <SecondaryButton className="group/status-parent flex h-[30px] items-center gap-[6px] px-[14px] text-[12px]" aria-disabled="true">Export ▾ <ImplementationStatusIcon label="Not implemented" description="Client export is not available yet." withinInteractiveControl /></SecondaryButton>
         </div>
       </div>
 
@@ -384,6 +394,12 @@ function ClientsPage() {
               </div>
 
               {error && <div className="col-span-3 mt-[14px] text-[12px] text-yb-red">{error}</div>}
+              {search.conversationId && existingPhoneClient && !error && (
+                <div className="col-span-3 mt-[14px] border border-[#b7cbbd] bg-[#edf7f0] px-[10px] py-[8px] text-[12px] leading-[1.45] text-yb-green">
+                  This WhatsApp number already belongs to <strong>{existingPhoneClient.name}</strong>.
+                  Continuing will link this Inbox conversation to that client; it will not create a duplicate.
+                </div>
+              )}
             </div>
 
             <aside className="border-l border-yb-line-soft bg-[#f9faf8] px-[18px] py-[16px]">
@@ -423,7 +439,11 @@ function ClientsPage() {
               type="submit"
               disabled={createMutation.isPending || !name.trim() || (feeGroupsQuery.data?.length ?? 0) === 0}
             >
-              {createMutation.isPending ? "Creating…" : search.conversationId ? "Create & Link Client" : "Create Client"}
+              {createMutation.isPending
+                ? existingPhoneClient ? "Linking…" : "Creating…"
+                : search.conversationId
+                  ? existingPhoneClient ? "Link Existing Client" : "Create & Link Client"
+                  : "Create Client"}
             </PrimaryButton>
           </div>
         </form>
@@ -450,12 +470,8 @@ function ClientsPage() {
               <option key={l}>{l}</option>
             ))}
           </select>
-          <a href="#" onClick={(e) => e.preventDefault()} className="text-[13px] text-yb-green underline">
-            Edit
-          </a>
-          <a href="#" onClick={(e) => e.preventDefault()} className="text-[13px] text-yb-green underline">
-            Create New View
-          </a>
+          <span className="flex items-center gap-[5px] text-[13px] text-yb-muted3">Edit <ImplementationStatusIcon label="Not implemented" description="Custom view editing is not available yet." /></span>
+          <span className="flex items-center gap-[5px] text-[13px] text-yb-muted3">Create New View <ImplementationStatusIcon label="Not implemented" description="Creating custom client views is not available yet." /></span>
           <div className="flex-1" />
           <label htmlFor="client-list-search" className="text-[12px] font-bold text-yb-muted">
             Search:

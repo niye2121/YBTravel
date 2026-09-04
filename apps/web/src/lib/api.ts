@@ -36,6 +36,16 @@ async function extractErrorMessage(res: Response): Promise<string> {
   return `Request failed with status ${res.status}`;
 }
 
+function handleUnauthorizedResponse(res: Response): void {
+  if (res.status !== 401) return;
+  disconnectSocket();
+  clearSession();
+  if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+    const redirect = `${window.location.pathname}${window.location.search}`;
+    window.location.replace(`/login?redirect=${encodeURIComponent(redirect)}`);
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
   const res = await fetch(`${API_URL}${path}`, {
@@ -49,29 +59,55 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     // A stale/expired token isn't recoverable — clear it so the next
     // navigation's route guard sends the user back to /login.
-    if (res.status === 401) {
-      disconnectSocket();
-      clearSession();
-      if (typeof window !== "undefined" && window.location.pathname !== "/login") {
-        const redirect = `${window.location.pathname}${window.location.search}`;
-        window.location.replace(`/login?redirect=${encodeURIComponent(redirect)}`);
-      }
-    }
+    handleUnauthorizedResponse(res);
     throw new Error(await extractErrorMessage(res));
   }
   return res.json() as Promise<T>;
 }
 
+async function requestFormData<T>(path: string, formData: FormData): Promise<T> {
+  const token = getToken();
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+  if (!res.ok) {
+    handleUnauthorizedResponse(res);
+    throw new Error(await extractErrorMessage(res));
+  }
+  return res.json() as Promise<T>;
+}
+
+async function requestBlob(path: string): Promise<Blob> {
+  const token = getToken();
+  const res = await fetch(`${API_URL}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    handleUnauthorizedResponse(res);
+    throw new Error(await extractErrorMessage(res));
+  }
+  return res.blob();
+}
+
 export type ConnectionStatus = "qr_pending" | "connected" | "disconnected";
 
 export type MessagingStatus = {
+  id: number;
+  label: string;
   status: ConnectionStatus;
   qr: string | null;
   phoneNumber: string | null;
+  isPrimary: boolean;
+  createdAt: string;
+  lastConnectedAt: string | null;
 };
 
 export type ConversationSummary = {
   id: number;
+  accountId: number;
+  accountLabel: string;
   whatsappJid: string;
   phoneNumber: string;
   displayName: string | null;
@@ -85,12 +121,17 @@ export type MessageRecord = {
   id: number;
   conversationId: number;
   direction: "inbound" | "outbound";
+  messageType: "text" | "audio";
   body: string;
   senderJid: string;
   providerMessageId: string | null;
   deliveryStatus: "pending" | "sending" | "sent" | "received" | "failed" | "delivery_unknown";
   deliveryAttemptCount: number;
   lastDeliveryError: string | null;
+  hasAudio: boolean;
+  audioMimeType: string | null;
+  audioSizeBytes: number | null;
+  audioDurationSeconds: number | null;
   createdAt: string;
 };
 
@@ -142,6 +183,14 @@ export type TravelRequestRecord = {
   clientId: number;
   clientName: string;
   tripSummary: string;
+  passengerCount: number | null;
+  origin: string | null;
+  destination: string | null;
+  departureDateText: string | null;
+  returnDateText: string | null;
+  cabinClass: string | null;
+  flexibility: string | null;
+  specialRequests: string | null;
   requestTypeId: number;
   requestTypeCode: string;
   requestTypeName: string;
@@ -164,6 +213,68 @@ export type TravelRequestRecord = {
   clientWhatsAppNumber: string | null;
   createdAt: string;
 };
+
+export type InformationChecklistItem = {
+  requirementFieldId: number;
+  entityType: "client" | "traveller" | "request";
+  entityId: number;
+  entityLabel: string;
+  fieldKey: string;
+  label: string;
+  required: boolean;
+  requiresReview: boolean;
+  present: boolean;
+  reviewed: boolean;
+  satisfied: boolean;
+  valueSummary: string | null;
+  reviewedByName: string | null;
+  reviewedAt: string | null;
+};
+
+export type ClientOnboardingStatus = {
+  clientId: number;
+  currentStageCode: string;
+  currentStageName: string;
+  completionStageCode: string | null;
+  canComplete: boolean;
+  missingItems: string[];
+  nextAction: string;
+  allowedStageCodes: string[];
+  checklist: InformationChecklistItem[];
+  transitions: Array<{
+    id: string;
+    fromStageCode: string | null;
+    fromStageName: string | null;
+    toStageCode: string;
+    toStageName: string;
+    reason: string | null;
+    changedByName: string | null;
+    changedAt: string;
+  }>;
+  tasks: Array<{
+    id: string;
+    title: string;
+    stageName: string;
+    responsibleRole: string | null;
+    priority: "low" | "normal" | "high" | "urgent";
+    dueAt: string | null;
+    status: "open" | "completed";
+    completedByName: string | null;
+    completedAt: string | null;
+  }>;
+};
+
+export type RequestInformationStatus = {
+  requestId: number;
+  complete: boolean;
+  missingItems: string[];
+  nextAction: string;
+  checklist: InformationChecklistItem[];
+};
+
+export type RequestDetailsInput = Pick<TravelRequestRecord,
+  "passengerCount" | "origin" | "destination" | "departureDateText" |
+  "returnDateText" | "cabinClass" | "flexibility" | "specialRequests">;
 
 export type AssignmentCandidate = {
   userId: number;
@@ -269,7 +380,20 @@ export type ClientTraveller = {
 
 export type SystemSettings = {
   demoDataEnabled: boolean;
+  testDataDeletionEnabled: boolean;
   updatedAt: string;
+};
+
+export type TestDataResetResult = {
+  deleted: {
+    conversations: number;
+    messages: number;
+    groups: number;
+    requests: number;
+    clients: number;
+    travellers: number;
+    notifications: number;
+  };
 };
 
 export type WhatsAppGroupOptions = {
@@ -282,6 +406,7 @@ export type WhatsAppGroupOptions = {
 export type GroupParticipantInput = { id: number; phoneNumber: string };
 
 export type CreateWhatsAppGroupInput = {
+  accountId: number;
   clientId: number;
   travelRequestId: number;
   name: string;
@@ -291,6 +416,8 @@ export type CreateWhatsAppGroupInput = {
 
 export type WhatsAppGroupRecord = {
   id: number;
+  accountId: number;
+  accountLabel: string;
   clientId: number;
   clientName: string;
   travelRequestId: number;
@@ -349,6 +476,21 @@ export type MessageTemplateInput = Omit<
   MessageTemplate,
   "id" | "isStarter" | "createdAt" | "updatedAt"
 >;
+
+export type PassengerCategory = "adult" | "child" | "infant";
+export type RequestBookingFee = {
+  requestId: number;
+  feeGroup: BookingFeeGroup;
+  availableTravellers: Array<{ id: number; name: string; dob: string | null }>;
+  passengers: Array<{ travellerId: number; name: string; category: PassengerCategory; charged: boolean; feeAmount: string }>;
+  chargedUnits: number;
+  totalAmount: string;
+  currency: string;
+  calculatedAt: string | null;
+};
+export type EntityNote = { id: string; clientId: number; travelRequestId: number | null; body: string; createdByName: string | null; createdAt: string; updatedAt: string };
+export type EntityDocument = { id: string; clientId: number; travelRequestId: number | null; fileName: string; mimeType: string; sizeBytes: number; sha256: string; description: string | null; uploadedByName: string | null; createdAt: string };
+export type RecordActivity = { id: string; type: "note" | "document" | "message"; title: string; detail: string; actorName: string | null; occurredAt: string; direction?: "inbound" | "outbound" };
 
 export type TaskPriority = "low" | "normal" | "high" | "urgent";
 export type SetupRole =
@@ -516,6 +658,11 @@ export const bookingFeesApi = {
       method: "PATCH",
       body: JSON.stringify(input),
     }),
+  getRequestFee: (requestId: number) => request<RequestBookingFee>(`/booking-fees/requests/${requestId}`),
+  saveRequestFee: (requestId: number, passengers: Array<{ travellerId: number; category: PassengerCategory }>) =>
+    request<RequestBookingFee>(`/booking-fees/requests/${requestId}`, {
+      method: "POST", body: JSON.stringify({ passengers }),
+    }),
 };
 
 export const messageTemplatesApi = {
@@ -531,7 +678,27 @@ export const messageTemplatesApi = {
       method: "PATCH",
       body: JSON.stringify(input),
     }),
+  render: (id: number, conversationId: number) =>
+    request<{ template: MessageTemplate; renderedText: string; missingVariables: string[] }>(`/message-templates/${id}/render`, {
+      method: "POST", body: JSON.stringify({ conversationId }),
+    }),
 };
+
+function recordApi(scope: "clients" | "requests") {
+  return {
+    listNotes: (id: number) => request<EntityNote[]>(`/${scope}/${id}/records/notes`),
+    addNote: (id: number, body: string) => request<EntityNote>(`/${scope}/${id}/records/notes`, { method: "POST", body: JSON.stringify({ body }) }),
+    listDocuments: (id: number) => request<EntityDocument[]>(`/${scope}/${id}/records/documents`),
+    uploadDocument: (id: number, file: File, description: string) => {
+      const form = new FormData(); form.append("document", file); if (description.trim()) form.append("description", description.trim());
+      return requestFormData<EntityDocument>(`/${scope}/${id}/records/documents`, form);
+    },
+    activity: (id: number) => request<RecordActivity[]>(`/${scope}/${id}/records/activity`),
+  };
+}
+export const clientRecordsApi = recordApi("clients");
+export const requestRecordsApi = recordApi("requests");
+export const recordDocumentsApi = { download: (id: string) => requestBlob(`/record-documents/${id}/download`) };
 
 export const workflowSettingsApi = {
   listActive: () => request<WorkflowSettings>("/workflow-settings"),
@@ -592,6 +759,16 @@ export const systemSettingsApi = {
       method: "PATCH",
       body: JSON.stringify({ demoDataEnabled }),
     }),
+  updateTestDataDeletion: (testDataDeletionEnabled: boolean) =>
+    request<SystemSettings>("/system-settings/test-data-deletion", {
+      method: "PATCH",
+      body: JSON.stringify({ testDataDeletionEnabled }),
+    }),
+  resetTestData: (confirmation: "DELETE ALL TEST DATA") =>
+    request<TestDataResetResult>("/system-settings/test-data/reset", {
+      method: "POST",
+      body: JSON.stringify({ confirmation }),
+    }),
 };
 
 export const clientsApi = {
@@ -611,6 +788,19 @@ export const clientsApi = {
     request<Client>("/clients", { method: "POST", body: JSON.stringify(input) }),
   update: (id: number, input: UpdateClientInput) =>
     request<Client>(`/clients/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  getOnboardingStatus: (id: number) =>
+    request<ClientOnboardingStatus>(`/clients/${id}/onboarding-status`),
+  reviewInformation: (
+    id: number,
+    input: { requirementFieldId: number; entityType: "client" | "traveller"; entityId: number },
+  ) => request<ClientOnboardingStatus>(`/clients/${id}/information/review`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  }),
+  completeOnboardingTask: (clientId: number, taskId: string) =>
+    request<ClientOnboardingStatus>(`/clients/${clientId}/onboarding-tasks/${taskId}/complete`, {
+      method: "POST",
+    }),
 };
 
 export const travellersApi = {
@@ -638,6 +828,18 @@ export const requestsApi = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+  getInformationStatus: (id: number) =>
+    request<RequestInformationStatus>(`/requests/${id}/information-status`),
+  updateDetails: (id: number, input: RequestDetailsInput) =>
+    request<TravelRequestRecord>(`/requests/${id}/details`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  reviewInformation: (id: number, requirementFieldId: number) =>
+    request<RequestInformationStatus>(`/requests/${id}/information/review`, {
+      method: "POST",
+      body: JSON.stringify({ requirementFieldId }),
+    }),
 };
 
 export const notificationsApi = {
@@ -658,12 +860,20 @@ export const assignmentSettingsApi = {
 
 export const messagingApi = {
   getStatus: () => request<MessagingStatus>("/messaging/status"),
+  listAccounts: () => request<MessagingStatus[]>("/messaging/accounts"),
+  createAccount: (label: string) => request<MessagingStatus>("/messaging/accounts", {
+    method: "POST",
+    body: JSON.stringify({ label }),
+  }),
+  reconnectAccount: (accountId: number) => request<MessagingStatus>(`/messaging/accounts/${accountId}/reconnect`, { method: "POST" }),
+  disconnectAccount: (accountId: number) => request<MessagingStatus>(`/messaging/accounts/${accountId}/disconnect`, { method: "POST" }),
   reconnect: () => request<MessagingStatus>("/messaging/reconnect", { method: "POST" }),
+  disconnect: () => request<MessagingStatus>("/messaging/disconnect", { method: "POST" }),
   listConversations: () => request<ConversationSummary[]>("/messaging/conversations"),
-  startConversation: (phoneNumber: string) =>
+  startConversation: (phoneNumber: string, accountId?: number) =>
     request<{ id: number }>("/messaging/conversations", {
       method: "POST",
-      body: JSON.stringify({ phoneNumber }),
+      body: JSON.stringify({ phoneNumber, accountId }),
     }),
   listMessages: (conversationId: number) =>
     request<MessageRecord[]>(`/messaging/conversations/${conversationId}/messages`),
@@ -690,6 +900,13 @@ export const messagingApi = {
       method: "POST",
       body: JSON.stringify({ text, travelRequestId }),
     }),
+  sendVoiceNote: (conversationId: number, audio: Blob, durationSeconds: number | null) => {
+    const formData = new FormData();
+    formData.append("audio", audio, "voice-note");
+    if (durationSeconds !== null) formData.append("durationSeconds", String(durationSeconds));
+    return requestFormData<{ ok: boolean }>(`/messaging/conversations/${conversationId}/voice-notes`, formData);
+  },
+  getMessageAudio: (messageId: number) => requestBlob(`/messaging/messages/${messageId}/audio`),
   getGroupOptions: () => request<WhatsAppGroupOptions>("/messaging/groups/options"),
   listGroups: () => request<WhatsAppGroupRecord[]>("/messaging/groups"),
   createGroup: (input: CreateWhatsAppGroupInput) =>

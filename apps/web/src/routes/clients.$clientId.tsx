@@ -6,6 +6,7 @@ import { AppHeader } from "../components/AppShell/AppHeader";
 import { PrimaryButton, SecondaryButton } from "../components/AppShell/buttons";
 import { bookingFeesApi, clientsApi, travellersApi, workflowSettingsApi } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
+import { EntityRecordsPanel } from "../components/EntityRecordsPanel";
 
 export const Route = createFileRoute("/clients/$clientId")({ component: ClientDetailPage });
 
@@ -19,6 +20,7 @@ type ClientEditState = {
   secondaryRepId: string;
   bookingFeeGroupId: string;
   stage: string;
+  onboardingTransitionReason: string;
 };
 
 const RELATIONSHIP_LABELS: Record<TravellerRelationship, string> = {
@@ -51,6 +53,11 @@ function dateLabel(value: string | null) {
   if (!value) return "—";
   const parsed = new Date(`${value.slice(0, 10)}T00:00:00`);
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString("en-US");
+}
+
+function dateTimeLabel(value: string) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 }
 
 function passportLabel(value: string) {
@@ -109,6 +116,11 @@ function ClientDetailPage() {
     queryFn: () => clientsApi.listTravellers(clientId),
     enabled: Number.isInteger(clientId) && clientId > 0,
   });
+  const onboardingQuery = useQuery({
+    queryKey: ["clients", clientId, "onboarding-status"],
+    queryFn: () => clientsApi.getOnboardingStatus(clientId),
+    enabled: Number.isInteger(clientId) && clientId > 0,
+  });
 
   const client = clientsQuery.data?.find((item) => item.id === clientId);
   const linkedIds = useMemo(
@@ -135,6 +147,7 @@ function ClientDetailPage() {
           ? String(matchingFeeGroup.id)
           : "",
       stage: current.stage,
+      onboardingTransitionReason: "",
     });
     setEditError(null);
     setNotice(null);
@@ -159,6 +172,7 @@ function ClientDetailPage() {
   function refreshTravellers() {
     void queryClient.invalidateQueries({ queryKey: ["clients", clientId, "travellers"] });
     void queryClient.invalidateQueries({ queryKey: ["travellers"] });
+    void queryClient.invalidateQueries({ queryKey: ["clients", clientId, "onboarding-status"] });
   }
 
   const createTravellerMutation = useMutation({
@@ -194,17 +208,36 @@ function ClientDetailPage() {
         secondaryRepId: input.secondaryRepId ? Number(input.secondaryRepId) : null,
         bookingFeeGroupId: Number(input.bookingFeeGroupId),
         stage: input.stage,
+        onboardingTransitionReason: input.onboardingTransitionReason.trim() || null,
       }),
     onSuccess: (updated) => {
       queryClient.setQueryData<Client[]>(["clients"], (current) =>
         (current ?? []).map((item) => (item.id === updated.id ? updated : item)),
       );
       void queryClient.invalidateQueries({ queryKey: ["clients"] });
+      void queryClient.invalidateQueries({ queryKey: ["clients", clientId, "onboarding-status"] });
       closeEditClient();
       setNotice("Client details updated.");
     },
     onError: (err: unknown) =>
       setEditError(err instanceof Error ? err.message : "Failed to update client"),
+  });
+
+  const reviewInformationMutation = useMutation({
+    mutationFn: (input: { requirementFieldId: number; entityType: "client" | "traveller"; entityId: number }) =>
+      clientsApi.reviewInformation(clientId, input),
+    onSuccess: (status) => {
+      queryClient.setQueryData(["clients", clientId, "onboarding-status"], status);
+      setNotice("Information reviewed. If the value changes later, it will require review again.");
+    },
+  });
+
+  const completeTaskMutation = useMutation({
+    mutationFn: (taskId: string) => clientsApi.completeOnboardingTask(clientId, taskId),
+    onSuccess: (status) => {
+      queryClient.setQueryData(["clients", clientId, "onboarding-status"], status);
+      setNotice("Onboarding task completed.");
+    },
   });
 
   function submitClientEdit(event: FormEvent) {
@@ -337,9 +370,18 @@ function ClientDetailPage() {
                   </FormField>
                   <FormField label="Onboarding stage" required>
                     <select required value={editState.stage} onChange={(event) => setEditState({ ...editState, stage: event.target.value })} className={controlClass}>
-                      {(workflowQuery.data?.stages ?? []).map((stage) => <option key={stage.id} value={stage.code}>{stage.name}</option>)}
+                      {(workflowQuery.data?.stages ?? []).filter((stage) =>
+                        !onboardingQuery.data || onboardingQuery.data.allowedStageCodes.includes(stage.code),
+                      ).map((stage) => <option key={stage.id} value={stage.code}>{stage.name}</option>)}
                     </select>
+                    <div className="mt-[4px] text-[10.5px] leading-[14px] text-[#6c766f]">Move forward one milestone at a time. Moving backward requires a reason.</div>
                   </FormField>
+
+                  <div className="col-span-3">
+                    <FormField label="Reason for moving backward (required only for a backward move)">
+                      <textarea rows={2} value={editState.onboardingTransitionReason} onChange={(event) => setEditState({ ...editState, onboardingTransitionReason: event.target.value })} className="w-full resize-y border border-[#8d968e] bg-white px-[8px] py-[6px] text-[13px] outline-none focus:border-[#1a6b46]" />
+                    </FormField>
+                  </div>
 
                   <div className="col-span-3">
                     <div className="mb-[5px] text-[12px] font-bold text-[#3c443d]">Client type</div>
@@ -470,6 +512,64 @@ function ClientDetailPage() {
 
             {notice && <div className="mb-[14px] border border-[#b7d1bf] bg-[#eef6f0] px-[12px] py-[9px] text-[12px] text-[#0d5c39]">{notice}</div>}
 
+            <section className="mb-[14px] border border-[#c3cbc2] bg-white">
+              <div className="flex items-center border-b border-[#d7dcd5] bg-[#eff2ec] px-[12px] py-[7px]">
+                <div className="text-[10px] font-bold tracking-[0.12em] text-[#5c665e]">ONBOARDING PROGRESS</div>
+                <div className="flex-1" />
+                {onboardingQuery.data && (
+                  <span className={`px-[7px] py-[2px] text-[10px] font-bold ${onboardingQuery.data.canComplete ? "bg-[#e8f5eb] text-[#0b5c3b]" : "bg-[#fff3d5] text-[#7b5b00]"}`}>
+                    {onboardingQuery.data.canComplete ? "READY TO COMPLETE" : `${onboardingQuery.data.missingItems.length} ACTIONS NEEDED`}
+                  </span>
+                )}
+              </div>
+              {onboardingQuery.isLoading && <div className="p-[18px] text-[12px] text-[#6c766f]">Checking onboarding requirements…</div>}
+              {onboardingQuery.isError && <div className="p-[18px] text-[12px] text-[#a8341f]">Onboarding progress could not be loaded.</div>}
+              {onboardingQuery.data && (
+                <div className="grid grid-cols-[minmax(0,1fr)_330px]">
+                  <div className="px-[16px] py-[14px]">
+                    <div className="mb-[12px] border border-[#cbd3ca] bg-[#f8faf7] px-[11px] py-[9px]">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#6c766f]">Next action</div>
+                      <div className="mt-[3px] text-[13px] font-bold text-[#2c332d]">{onboardingQuery.data.nextAction}</div>
+                    </div>
+                    <div className="mb-[7px] text-[10px] font-bold uppercase tracking-[0.1em] text-[#5c665e]">Required information</div>
+                    {onboardingQuery.data.checklist.length === 0 && <div className="text-[12px] text-[#6c766f]">No active information requirements are configured.</div>}
+                    {onboardingQuery.data.checklist.map((item) => (
+                      <div key={`${item.requirementFieldId}-${item.entityType}-${item.entityId}`} className="flex items-center gap-[10px] border-b border-[#edf0ea] py-[8px] last:border-b-0">
+                        <span className={`h-[9px] w-[9px] rounded-full ${item.satisfied ? "bg-[#249155]" : item.present ? "bg-[#d89b13]" : "bg-[#b63a2b]"}`} />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[12px] font-bold text-[#2c332d]">{item.entityLabel} · {item.label}</div>
+                          <div className="truncate text-[10.5px] text-[#6c766f]">{item.present ? item.valueSummary : "Missing"}{item.reviewed ? ` · reviewed${item.reviewedByName ? ` by ${item.reviewedByName}` : ""}` : item.requiresReview && item.present ? " · review required" : ""}</div>
+                        </div>
+                        {item.present && item.requiresReview && !item.reviewed && !client.isDemo && (
+                          <button type="button" disabled={reviewInformationMutation.isPending} onClick={() => reviewInformationMutation.mutate({ requirementFieldId: item.requirementFieldId, entityType: item.entityType as "client" | "traveller", entityId: item.entityId })} className="border border-[#0b5c3b] bg-white px-[9px] py-[4px] text-[10.5px] font-bold text-[#0b5c3b] hover:bg-[#edf7f0] disabled:opacity-50">Confirm reviewed</button>
+                        )}
+                      </div>
+                    ))}
+                    {reviewInformationMutation.isError && <div className="mt-[8px] text-[11px] text-[#a8341f]">{reviewInformationMutation.error instanceof Error ? reviewInformationMutation.error.message : "Review could not be saved"}</div>}
+                  </div>
+                  <aside className="border-l border-[#d7dcd5] bg-[#f9faf8] px-[14px] py-[14px]">
+                    <div className="mb-[7px] text-[10px] font-bold uppercase tracking-[0.1em] text-[#5c665e]">Milestone tasks</div>
+                    {onboardingQuery.data.tasks.filter((task) => task.status === "open").length === 0 && <div className="mb-[14px] text-[11.5px] text-[#6c766f]">No open milestone tasks.</div>}
+                    {onboardingQuery.data.tasks.filter((task) => task.status === "open").map((task) => (
+                      <div key={task.id} className="mb-[8px] border border-[#cbd3ca] bg-white p-[8px]">
+                        <div className="text-[11.5px] font-bold">{task.title}</div>
+                        <div className="mt-[2px] text-[10px] text-[#6c766f]">{task.priority.toUpperCase()}{task.dueAt ? ` · due ${dateLabel(task.dueAt)}` : ""}</div>
+                        {!client.isDemo && <button type="button" disabled={completeTaskMutation.isPending} onClick={() => completeTaskMutation.mutate(task.id)} className="mt-[6px] text-[10.5px] font-bold text-[#0b5c3b] underline">Mark complete</button>}
+                      </div>
+                    ))}
+                    <div className="mb-[7px] mt-[12px] border-t border-[#d7dcd5] pt-[10px] text-[10px] font-bold uppercase tracking-[0.1em] text-[#5c665e]">Stage history</div>
+                    {onboardingQuery.data.transitions.slice(0, 5).map((transition) => (
+                      <div key={transition.id} className="mb-[7px] border-l-2 border-[#b9d2c1] pl-[7px] text-[10.5px]">
+                        <div className="font-bold">{transition.fromStageName ? `${transition.fromStageName} → ` : "Started at "}{transition.toStageName}</div>
+                        <div className="text-[#6c766f]">{dateTimeLabel(transition.changedAt)}{transition.changedByName ? ` · ${transition.changedByName}` : ""}</div>
+                        {transition.reason && <div className="mt-[2px] text-[#59635b]">{transition.reason}</div>}
+                      </div>
+                    ))}
+                  </aside>
+                </div>
+              )}
+            </section>
+
             <section className="border border-[#c3cbc2] bg-white">
               <div className="flex items-center border-b border-[#d7dcd5] bg-[#eff2ec] px-[12px] py-[7px]">
                 <div className="text-[10px] font-bold tracking-[0.12em] text-[#5c665e]">TRAVELLERS</div>
@@ -494,6 +594,7 @@ function ClientDetailPage() {
               {clientTravellersQuery.isLoading && <div className="p-[24px] text-center text-[12px] text-[#6c766f]">Loading travellers…</div>}
               {!clientTravellersQuery.isLoading && (clientTravellersQuery.data?.length ?? 0) === 0 && <div className="p-[24px] text-center text-[12px] text-[#6c766f]">No travellers are linked to this client yet. Use Add Traveller to create or attach one.</div>}
             </section>
+            {!client.isDemo && <EntityRecordsPanel entity="client" id={clientId} />}
           </>
         )}
       </main>

@@ -7,8 +7,39 @@ CREATE TABLE IF NOT EXISTS whatsapp_connections (
   label TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'qr_pending' CHECK (status IN ('qr_pending', 'connected', 'disconnected')),
   phone_number TEXT,
+  auth_key TEXT,
+  is_primary BOOLEAN NOT NULL DEFAULT false,
+  active BOOLEAN NOT NULL DEFAULT true,
+  last_connected_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE whatsapp_connections ADD COLUMN IF NOT EXISTS auth_key TEXT;
+ALTER TABLE whatsapp_connections ADD COLUMN IF NOT EXISTS is_primary BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE whatsapp_connections ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE whatsapp_connections ADD COLUMN IF NOT EXISTS last_connected_at TIMESTAMPTZ;
+ALTER TABLE whatsapp_connections ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+-- The pre-multi-account Baileys credentials continue to live at
+-- apps/api/.baileys-auth. This row adopts that directory in place; it does
+-- not move, clear, or log out the existing linked WhatsApp session.
+INSERT INTO whatsapp_connections (label, status, auth_key, is_primary)
+SELECT 'Primary WhatsApp', 'disconnected', 'primary', true
+WHERE NOT EXISTS (SELECT 1 FROM whatsapp_connections);
+
+UPDATE whatsapp_connections
+SET auth_key = CASE WHEN is_primary OR id = (SELECT min(id) FROM whatsapp_connections)
+                    THEN 'primary' ELSE 'account-' || id::text END,
+    is_primary = (id = (SELECT min(id) FROM whatsapp_connections))
+WHERE auth_key IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS whatsapp_connections_auth_key_uq
+  ON whatsapp_connections (auth_key);
+CREATE UNIQUE INDEX IF NOT EXISTS whatsapp_connections_one_primary_uq
+  ON whatsapp_connections (is_primary) WHERE is_primary = true;
+CREATE UNIQUE INDEX IF NOT EXISTS whatsapp_connections_lower_label_uq
+  ON whatsapp_connections (lower(label)) WHERE active = true;
 
 CREATE TABLE IF NOT EXISTS conversations (
   id SERIAL PRIMARY KEY,
@@ -23,11 +54,22 @@ CREATE TABLE IF NOT EXISTS conversations (
 -- names were stored. Keep startup migrations idempotent while adding the
 -- column to those databases too.
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS display_name TEXT;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS whatsapp_connection_id INTEGER REFERENCES whatsapp_connections(id);
+UPDATE conversations
+SET whatsapp_connection_id = (SELECT id FROM whatsapp_connections WHERE is_primary = true LIMIT 1)
+WHERE whatsapp_connection_id IS NULL;
+ALTER TABLE conversations ALTER COLUMN whatsapp_connection_id SET NOT NULL;
+ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_whatsapp_jid_key;
+CREATE UNIQUE INDEX IF NOT EXISTS conversations_connection_jid_uq
+  ON conversations (whatsapp_connection_id, whatsapp_jid);
+CREATE INDEX IF NOT EXISTS conversations_connection_last_message_idx
+  ON conversations (whatsapp_connection_id, last_message_at DESC);
 
 CREATE TABLE IF NOT EXISTS messages (
   id SERIAL PRIMARY KEY,
   conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   direction TEXT NOT NULL CHECK (direction IN ('inbound', 'outbound')),
+  message_type TEXT NOT NULL DEFAULT 'text' CHECK (message_type IN ('text', 'audio')),
   body TEXT NOT NULL,
   sender_jid TEXT NOT NULL,
   provider_message_id TEXT,
@@ -41,6 +83,7 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS provider_message_id TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_type TEXT NOT NULL DEFAULT 'text';
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS delivery_status TEXT NOT NULL DEFAULT 'received';
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS delivery_attempt_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS last_delivery_error TEXT;
@@ -56,12 +99,29 @@ ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_delivery_status_check;
 ALTER TABLE messages ADD CONSTRAINT messages_delivery_status_check
   CHECK (delivery_status IN ('pending', 'sending', 'sent', 'received', 'failed', 'delivery_unknown'));
 
+ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_message_type_check;
+ALTER TABLE messages ADD CONSTRAINT messages_message_type_check
+  CHECK (message_type IN ('text', 'audio'));
+
 CREATE UNIQUE INDEX IF NOT EXISTS messages_provider_id_uq
   ON messages (direction, provider_message_id)
   WHERE provider_message_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS messages_conversation_id_created_at_idx
   ON messages (conversation_id, created_at);
+
+-- Audio bytes stay attached to their message and inherit the message's access
+-- control. The bounded size protects database backups and API memory. Audio is
+-- returned only through the authenticated messaging controller.
+CREATE TABLE IF NOT EXISTS message_media (
+  message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+  mime_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL CHECK (size_bytes > 0 AND size_bytes <= 10485760),
+  sha256 TEXT NOT NULL CHECK (length(sha256) = 64),
+  duration_seconds INTEGER CHECK (duration_seconds IS NULL OR duration_seconds BETWEEN 0 AND 3600),
+  data BYTEA NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 CREATE TABLE IF NOT EXISTS message_delivery_attempts (
   id BIGSERIAL PRIMARY KEY,
@@ -173,9 +233,13 @@ CREATE INDEX IF NOT EXISTS staff_notifications_user_unread_idx
 CREATE TABLE IF NOT EXISTS system_settings (
   id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
   demo_data_enabled BOOLEAN NOT NULL DEFAULT false,
+  test_data_deletion_enabled BOOLEAN NOT NULL DEFAULT false,
   updated_by INTEGER REFERENCES users(id),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE system_settings
+  ADD COLUMN IF NOT EXISTS test_data_deletion_enabled BOOLEAN NOT NULL DEFAULT false;
 
 INSERT INTO system_settings (id, demo_data_enabled)
 VALUES (1, false)
@@ -524,6 +588,49 @@ ALTER TABLE clients
 -- allow administrators to add future stages without another migration.
 ALTER TABLE clients DROP CONSTRAINT IF EXISTS clients_stage_check;
 
+-- Enforce uniqueness below the application layer. The trigger remains
+-- deployable when a legacy database already has duplicate rows: old data stays
+-- readable, while every future insert or phone update is serialized by its
+-- normalized digits and cannot introduce another duplicate real client.
+CREATE OR REPLACE FUNCTION enforce_unique_real_client_phone()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  normalized_digits TEXT;
+BEGIN
+  IF NEW.is_demo OR NEW.phone_number IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  normalized_digits := regexp_replace(NEW.phone_number, '[^0-9]', '', 'g');
+  IF normalized_digits = '' THEN
+    NEW.phone_number := NULL;
+    RETURN NEW;
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtext('client-phone:' || normalized_digits));
+  IF EXISTS (
+    SELECT 1
+    FROM clients existing
+    WHERE NOT existing.is_demo
+      AND existing.id IS DISTINCT FROM NEW.id
+      AND regexp_replace(COALESCE(existing.phone_number, ''), '[^0-9]', '', 'g') = normalized_digits
+  ) THEN
+    RAISE EXCEPTION 'client phone number already exists'
+      USING ERRCODE = '23505', CONSTRAINT = 'clients_phone_digits_unique';
+  END IF;
+
+  NEW.phone_number := '+' || normalized_digits;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS clients_phone_digits_unique_trigger ON clients;
+CREATE TRIGGER clients_phone_digits_unique_trigger
+BEFORE INSERT OR UPDATE OF phone_number, is_demo ON clients
+FOR EACH ROW EXECUTE FUNCTION enforce_unique_real_client_phone();
+
 -- Direct WhatsApp conversations belong to one client after intake links or
 -- creates the profile. Add the relationship only after clients exists because
 -- conversations is created earlier in this idempotent schema file.
@@ -600,6 +707,14 @@ ALTER TABLE travel_requests
   ADD COLUMN IF NOT EXISTS assigned_by_user_id INTEGER REFERENCES users(id);
 ALTER TABLE travel_requests
   ADD COLUMN IF NOT EXISTS assignment_status TEXT NOT NULL DEFAULT 'unassigned';
+ALTER TABLE travel_requests ADD COLUMN IF NOT EXISTS passenger_count INTEGER CHECK (passenger_count BETWEEN 1 AND 100);
+ALTER TABLE travel_requests ADD COLUMN IF NOT EXISTS origin TEXT;
+ALTER TABLE travel_requests ADD COLUMN IF NOT EXISTS destination TEXT;
+ALTER TABLE travel_requests ADD COLUMN IF NOT EXISTS departure_date_text TEXT;
+ALTER TABLE travel_requests ADD COLUMN IF NOT EXISTS return_date_text TEXT;
+ALTER TABLE travel_requests ADD COLUMN IF NOT EXISTS cabin_class TEXT;
+ALTER TABLE travel_requests ADD COLUMN IF NOT EXISTS flexibility TEXT;
+ALTER TABLE travel_requests ADD COLUMN IF NOT EXISTS special_requests TEXT;
 
 UPDATE travel_requests
 SET assignment_status = CASE WHEN assigned_user_id IS NULL THEN 'unassigned' ELSE 'assigned' END
@@ -797,6 +912,119 @@ CREATE TABLE IF NOT EXISTS traveller_accounts (
   PRIMARY KEY (client_id, traveller_id)
 );
 
+-- The traveller selection and fee result used for a request. A new fee quote
+-- is appended on every confirmed calculation so later fee-group edits never
+-- rewrite what staff previously showed or approved.
+CREATE TABLE IF NOT EXISTS travel_request_travellers (
+  travel_request_id INTEGER NOT NULL REFERENCES travel_requests(id) ON DELETE CASCADE,
+  traveller_id INTEGER NOT NULL REFERENCES travellers(id) ON DELETE CASCADE,
+  passenger_category TEXT NOT NULL CHECK (passenger_category IN ('adult', 'child', 'infant')),
+  added_by INTEGER REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (travel_request_id, traveller_id)
+);
+
+CREATE TABLE IF NOT EXISTS request_booking_fee_quotes (
+  id BIGSERIAL PRIMARY KEY,
+  travel_request_id INTEGER NOT NULL REFERENCES travel_requests(id) ON DELETE CASCADE,
+  booking_fee_group_id INTEGER REFERENCES booking_fee_groups(id),
+  fee_group_name TEXT NOT NULL,
+  fee_group_code TEXT NOT NULL,
+  amount NUMERIC(12, 2) NOT NULL CHECK (amount >= 0),
+  currency CHAR(3) NOT NULL,
+  calculation_basis TEXT NOT NULL CHECK (calculation_basis IN ('per_passenger', 'per_booking')),
+  passenger_count INTEGER NOT NULL CHECK (passenger_count >= 0),
+  charged_units INTEGER NOT NULL CHECK (charged_units >= 0),
+  total_amount NUMERIC(14, 2) NOT NULL CHECK (total_amount >= 0),
+  line_items JSONB NOT NULL,
+  calculated_by INTEGER REFERENCES users(id),
+  calculated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS request_booking_fee_quotes_request_idx
+  ON request_booking_fee_quotes (travel_request_id, calculated_at DESC, id DESC);
+
+-- Phase 1 internal records. Files are intentionally served only through an
+-- authenticated controller; the checksum supports integrity verification and
+-- file contents are never copied into audit events.
+CREATE TABLE IF NOT EXISTS entity_notes (
+  id BIGSERIAL PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  travel_request_id INTEGER REFERENCES travel_requests(id) ON DELETE SET NULL,
+  body TEXT NOT NULL CHECK (length(trim(body)) BETWEEN 1 AND 5000),
+  created_by INTEGER REFERENCES users(id),
+  updated_by INTEGER REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS entity_notes_client_idx ON entity_notes (client_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS entity_notes_request_idx ON entity_notes (travel_request_id, created_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS entity_documents (
+  id BIGSERIAL PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  travel_request_id INTEGER REFERENCES travel_requests(id) ON DELETE SET NULL,
+  file_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL CHECK (size_bytes BETWEEN 1 AND 10485760),
+  sha256 TEXT NOT NULL CHECK (length(sha256) = 64),
+  content BYTEA NOT NULL,
+  description TEXT,
+  uploaded_by INTEGER REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS entity_documents_client_idx ON entity_documents (client_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS entity_documents_request_idx ON entity_documents (travel_request_id, created_at DESC, id DESC);
+
+-- Evidence that a particular current field value was reviewed. The value
+-- fingerprint makes review evidence self-invalidating: when staff later edit
+-- the underlying value, the old review no longer satisfies onboarding.
+CREATE TABLE IF NOT EXISTS information_field_reviews (
+  requirement_field_id INTEGER NOT NULL REFERENCES required_information_fields(id) ON DELETE CASCADE,
+  entity_type TEXT NOT NULL CHECK (entity_type IN ('client', 'traveller', 'request')),
+  entity_id INTEGER NOT NULL,
+  value_fingerprint TEXT NOT NULL CHECK (length(value_fingerprint) = 64),
+  reviewed_by INTEGER NOT NULL REFERENCES users(id),
+  reviewed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (requirement_field_id, entity_type, entity_id)
+);
+
+CREATE INDEX IF NOT EXISTS information_field_reviews_entity_idx
+  ON information_field_reviews (entity_type, entity_id);
+
+CREATE TABLE IF NOT EXISTS client_onboarding_transitions (
+  id BIGSERIAL PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  from_stage_code TEXT,
+  to_stage_code TEXT NOT NULL,
+  reason TEXT,
+  changed_by INTEGER REFERENCES users(id),
+  changed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS client_onboarding_transitions_client_idx
+  ON client_onboarding_transitions (client_id, changed_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS onboarding_tasks (
+  id BIGSERIAL PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  stage_id INTEGER NOT NULL REFERENCES onboarding_stages(id),
+  title TEXT NOT NULL,
+  responsible_role TEXT,
+  priority TEXT NOT NULL CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+  due_at TIMESTAMPTZ,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'completed')),
+  created_by INTEGER REFERENCES users(id),
+  completed_by INTEGER REFERENCES users(id),
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS onboarding_tasks_client_status_idx
+  ON onboarding_tasks (client_id, status, due_at, id);
+
 ALTER TABLE traveller_accounts
   DROP CONSTRAINT IF EXISTS traveller_accounts_relationship_check;
 
@@ -925,6 +1153,15 @@ CREATE TABLE IF NOT EXISTS whatsapp_groups (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE whatsapp_groups ADD COLUMN IF NOT EXISTS whatsapp_connection_id INTEGER REFERENCES whatsapp_connections(id);
+UPDATE whatsapp_groups g
+SET whatsapp_connection_id = COALESCE(
+  (SELECT c.whatsapp_connection_id FROM conversations c WHERE c.id = g.conversation_id),
+  (SELECT id FROM whatsapp_connections WHERE is_primary = true LIMIT 1)
+)
+WHERE whatsapp_connection_id IS NULL;
+ALTER TABLE whatsapp_groups ALTER COLUMN whatsapp_connection_id SET NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS whatsapp_groups_lower_name_uq
   ON whatsapp_groups (lower(name));

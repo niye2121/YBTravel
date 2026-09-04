@@ -35,9 +35,18 @@ Never place production secret values in tickets, chat, source control, or deploy
 ## Message reliability
 
 - Every inbound provider message ID is unique in the database. Provider replay is acknowledged but does not create another message or AI intake.
+- Voice notes are bounded to 10 MB before storage, retain a SHA-256 checksum and media metadata, and are fetched through an authenticated endpoint instead of a public file URL. Raw audio bytes are not written to audit records.
+- Incoming voice notes bypass the text-only AI intake parser. Staff-uploaded audio is validated by file signature rather than trusting its filename or browser-declared content type.
 - Outbound messages are recorded before sending. Each attempt records start, success/failure, provider message ID, error, and completion time.
 - Known failures retry up to three times with short backoff. Ambiguous network failures are marked `delivery_unknown` and are not automatically retried because the provider may already have delivered them.
 - Administrators can inspect `GET /messaging/delivery-failures`. A human must reconcile `delivery_unknown` with WhatsApp before sending again.
+
+## WhatsApp disconnect and re-pairing
+
+- Only a System Administrator can deliberately disconnect the linked WhatsApp account from the Inbox.
+- Disconnecting logs the linked device out, preserves the invalidated local credentials in the restricted auth-backup directory, and immediately starts a clean pairing flow.
+- The Inbox changes from **Connected** to **Waiting for scan** when the new QR code is ready. Existing conversations and stored message history remain available while disconnected.
+- The disconnect action is recorded in the shared audit log. QR pairing tokens are never copied into audit records.
 
 ## Sensitive traveller data
 

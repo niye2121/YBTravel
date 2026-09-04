@@ -8,8 +8,12 @@ import {
   Patch,
   Post,
   Req,
+  StreamableFile,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import { z, ZodError } from "zod";
 import { AllowedRoles } from "../auth/allowed-roles.decorator";
 import { AuthGuard } from "../auth/auth.guard";
@@ -30,12 +34,20 @@ const participantSchema = z.object({
 
 const startConversationSchema = z.object({
   phoneNumber: z.string().trim().min(8).max(30),
+  accountId: z.number().int().positive().optional(),
 });
+
+const createAccountSchema = z.object({ label: z.string().trim().min(2).max(80) });
 
 const sendMessageSchema = z.object({
   text: z.string().trim().min(1, "Reply message is required").max(2000),
   travelRequestId: z.number().int().positive().optional(),
 });
+
+type UploadedAudio = {
+  buffer: Buffer;
+  size: number;
+};
 
 const updateDraftIntakeSchema = z.object({
   requestTypeId: z.number().int().positive(),
@@ -52,6 +64,7 @@ const updateDraftIntakeSchema = z.object({
 
 const createGroupSchema = z
   .object({
+    accountId: z.number().int().positive(),
     clientId: z.number().int().positive(),
     travelRequestId: z.number().int().positive(),
     name: z.string().trim().min(1, "Group name is required").max(100),
@@ -90,11 +103,50 @@ export class MessagingController {
     return this.messaging.getStatus();
   }
 
+  @Get("accounts")
+  listAccounts() {
+    return this.messaging.listAccounts();
+  }
+
+  @Post("accounts")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("system_administrator")
+  createAccount(@Req() request: AuthenticatedRequest, @Body() body: unknown) {
+    try {
+      const input = createAccountSchema.parse(body);
+      return this.messaging.createAccount(input.label, request.user.id);
+    } catch (error) {
+      if (error instanceof ZodError) throw new BadRequestException(error.flatten().fieldErrors);
+      throw error;
+    }
+  }
+
+  @Post("accounts/:id/reconnect")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("system_administrator")
+  reconnectAccount(@Param("id", ParseIntPipe) id: number) {
+    return this.messaging.reconnect(id);
+  }
+
+  @Post("accounts/:id/disconnect")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("system_administrator")
+  disconnectAccount(@Param("id", ParseIntPipe) id: number, @Req() request: AuthenticatedRequest) {
+    return this.messaging.disconnect(request.user.id, id);
+  }
+
   @Post("reconnect")
   @UseGuards(RoleGuard)
   @AllowedRoles("system_administrator")
   reconnect() {
     return this.messaging.reconnect();
+  }
+
+  @Post("disconnect")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("system_administrator")
+  disconnect(@Req() request: AuthenticatedRequest) {
+    return this.messaging.disconnect(request.user.id);
   }
 
   @Get("conversations")
@@ -106,7 +158,7 @@ export class MessagingController {
   startConversation(@Body() body: unknown): Promise<{ id: number }> {
     try {
       const input = startConversationSchema.parse(body);
-      return this.messaging.startDirectConversation(input.phoneNumber);
+      return this.messaging.startDirectConversation(input.phoneNumber, input.accountId);
     } catch (error) {
       if (error instanceof ZodError) throw new BadRequestException(error.flatten().fieldErrors);
       throw error;
@@ -123,6 +175,16 @@ export class MessagingController {
   @AllowedRoles("system_administrator")
   listDeliveryFailures() {
     return this.messaging.listDeliveryFailures();
+  }
+
+  @Get("messages/:id/audio")
+  async getMessageAudio(@Param("id", ParseIntPipe) id: number): Promise<StreamableFile> {
+    const audio = await this.messaging.getMessageAudio(id);
+    return new StreamableFile(audio.data, {
+      type: audio.mimeType,
+      length: audio.sizeBytes,
+      disposition: `inline; filename="voice-note-${id}"`,
+    });
   }
 
   @Post("messages/:id/retry")
@@ -228,5 +290,21 @@ export class MessagingController {
       if (error instanceof ZodError) throw new BadRequestException(error.flatten().fieldErrors);
       throw error;
     }
+  }
+
+  @Post("conversations/:id/voice-notes")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  @UseInterceptors(FileInterceptor("audio", { limits: { fileSize: 10 * 1024 * 1024, files: 1 } }))
+  async sendVoiceNote(
+    @Param("id", ParseIntPipe) id: number,
+    @Req() request: AuthenticatedRequest,
+    @UploadedFile() file: UploadedAudio | undefined,
+    @Body("durationSeconds") rawDuration: string | undefined,
+  ) {
+    if (!file?.buffer?.length) throw new BadRequestException("Select or record a voice note");
+    const parsedDuration = rawDuration === undefined || rawDuration === "" ? null : Number(rawDuration);
+    await this.messaging.sendVoiceNote(id, file.buffer, parsedDuration, request.user.id);
+    return { ok: true };
   }
 }

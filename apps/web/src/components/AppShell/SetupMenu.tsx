@@ -13,6 +13,7 @@ const SETUP_ITEMS = [
   { label: "Booking Fees", to: "/booking-fees" as const },
   { label: "Onboarding & Required Info", to: "/onboarding-settings" as const },
   { label: "Request Workflow", to: "/request-workflow-settings" as const },
+  { label: "WhatsApp Accounts", to: "/whatsapp-accounts" as const },
   { label: "AI Provider", to: "/ai-provider-settings" as const },
 ];
 

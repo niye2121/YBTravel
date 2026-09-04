@@ -43,9 +43,9 @@ function WhatsAppGroupsPage() {
   const canCreate =
     user?.roles.some((role) => role === "travel_agent" || role === "system_administrator") ?? false;
 
-  const statusQuery = useQuery({
-    queryKey: ["messaging", "status"],
-    queryFn: messagingApi.getStatus,
+  const accountsQuery = useQuery({
+    queryKey: ["messaging", "accounts"],
+    queryFn: messagingApi.listAccounts,
     refetchInterval: 5000,
   });
   const optionsQuery = useQuery({
@@ -59,7 +59,6 @@ function WhatsAppGroupsPage() {
   const conversationsQuery = useQuery({
     queryKey: ["messaging", "conversations"],
     queryFn: messagingApi.listConversations,
-    enabled: statusQuery.data?.status === "connected",
   });
   const requestSettingsQuery = useQuery({
     queryKey: ["request-workflow-settings", "active"],
@@ -67,6 +66,7 @@ function WhatsAppGroupsPage() {
   });
 
   const [formOpen, setFormOpen] = useState(false);
+  const [accountId, setAccountId] = useState("");
   const [clientId, setClientId] = useState("");
   const [travelRequestId, setTravelRequestId] = useState("");
   const [groupName, setGroupName] = useState("");
@@ -98,6 +98,12 @@ function WhatsAppGroupsPage() {
     const defaultType = requestSettingsQuery.data?.requestTypes[0];
     if (defaultType) setRequestTypeId(String(defaultType.id));
   }, [requestFormOpen, requestTypeId, requestSettingsQuery.data?.requestTypes]);
+
+  useEffect(() => {
+    if (accountId || !accountsQuery.data?.length) return;
+    const primary = accountsQuery.data.find((account) => account.isPrimary) ?? accountsQuery.data[0];
+    if (primary) setAccountId(String(primary.id));
+  }, [accountId, accountsQuery.data]);
 
   const requestMutation = useMutation({
     mutationFn: requestsApi.create,
@@ -202,6 +208,7 @@ function WhatsAppGroupsPage() {
     event.preventDefault();
     setFormError(null);
     const input: CreateWhatsAppGroupInput = {
+      accountId: Number(accountId),
       clientId: Number(clientId),
       travelRequestId: Number(travelRequestId),
       name: groupName,
@@ -217,7 +224,8 @@ function WhatsAppGroupsPage() {
   const selectedPhones = [...Object.values(travellerPhones), ...Object.values(staffPhones)];
   const participantPhonesReady =
     selectedPhones.length > 0 && selectedPhones.every((phone) => phone.replace(/\D/g, "").length >= 8);
-  const connected = statusQuery.data?.status === "connected";
+  const selectedAccount = accountsQuery.data?.find((account) => String(account.id) === accountId);
+  const connected = selectedAccount?.status === "connected";
   const groups = groupsQuery.data ?? [];
   const conversations = conversationsQuery.data ?? [];
   const groupCanSubmit =
@@ -282,6 +290,10 @@ function WhatsAppGroupsPage() {
           <div className="grid grid-cols-[minmax(0,1fr)_300px]">
             <div className="min-w-0 px-[20px] py-[16px]">
               <div className="mb-[12px] border-b border-yb-line-soft pb-[6px] text-[10.5px] font-bold tracking-[1.3px] text-yb-panel-head-text">STEP 1 · LINK THE GROUP</div>
+              <div className="mb-[12px] grid grid-cols-[90px_minmax(0,1fr)] items-start gap-[10px]">
+                <label htmlFor="whatsapp-group-account" className="pt-[9px] text-right text-[12px] text-yb-muted"><span className="mr-[3px] font-bold text-yb-red">*</span>Account</label>
+                <div><select id="whatsapp-group-account" required value={accountId} onChange={(event) => setAccountId(event.target.value)} className={inputClass}><option value="">Select connected account</option>{(accountsQuery.data ?? []).map((account) => <option key={account.id} value={account.id}>{account.label} · {account.status === "connected" ? `+${account.phoneNumber}` : "not connected"}</option>)}</select><div className="mt-[3px] text-[11px] text-yb-muted4">This number will own the WhatsApp group and route its messages.</div></div>
+              </div>
               <div className="grid grid-cols-2 gap-x-[30px]">
                 <div className="grid grid-cols-[90px_minmax(0,1fr)] items-start gap-[10px]">
                   <label htmlFor="whatsapp-group-client" className="pt-[9px] text-right text-[12px] text-yb-muted"><span className="mr-[3px] font-bold text-yb-red">*</span>Client</label>
@@ -367,7 +379,7 @@ function WhatsAppGroupsPage() {
               <div className="border border-yb-line-soft bg-white p-[10px]">
                 <div className="flex items-center gap-[9px]"><div className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-yb-green text-[11px] font-bold text-white">GR</div><div className="min-w-0"><div className="truncate text-[12.5px] font-bold">{groupName.trim() || "Group name will appear here"}</div><div className="text-[11px] text-yb-muted4">{selectedCount + 1} participant{selectedCount === 0 ? "" : "s"} incl. desk number</div></div></div>
               </div>
-              <div className="mt-[12px] text-[11.5px] leading-[18px] text-yb-muted2">The connected number <strong>{statusQuery.data?.phoneNumber ? `+${statusQuery.data.phoneNumber.replace(/^\+/, "")}` : "—"}</strong> is included automatically by WhatsApp.</div>
+              <div className="mt-[12px] text-[11.5px] leading-[18px] text-yb-muted2">The selected account <strong>{selectedAccount?.label ?? "—"}</strong> {selectedAccount?.phoneNumber ? `(+${selectedAccount.phoneNumber.replace(/^\+/, "")})` : ""} is included automatically by WhatsApp.</div>
               <div className="my-[12px] border-t border-yb-line-row" />
               <div className="text-[11.5px] leading-[18px] text-yb-muted3">Each selected participant must have a valid WhatsApp number. Registration is checked before the group is created.</div>
             </aside>
@@ -402,7 +414,7 @@ function WhatsAppGroupsPage() {
         <div className="flex items-center border-b border-yb-line bg-yb-panel-head px-[12px] py-[7px]"><div className="text-[10.5px] font-bold tracking-[1.2px] text-yb-panel-head-text">MANAGED WHATSAPP GROUPS</div><div className="flex-1" /><div className="text-[11px] text-yb-muted3">{groups.length} groups</div></div>
         <table className="w-full table-fixed border-collapse text-[12.5px]">
           <thead><tr className="bg-yb-table-head"><th className="w-[250px] border-b border-yb-line px-[12px] py-[7px] text-left text-[11px] font-bold text-yb-muted">Group</th><th className="w-[170px] border-b border-yb-line px-[12px] py-[7px] text-left text-[11px] font-bold text-yb-muted">Client</th><th className="w-[210px] border-b border-yb-line px-[12px] py-[7px] text-left text-[11px] font-bold text-yb-muted">Request</th><th className="border-b border-yb-line px-[12px] py-[7px] text-left text-[11px] font-bold text-yb-muted">Participants</th><th className="w-[100px] border-b border-yb-line px-[12px] py-[7px] text-left text-[11px] font-bold text-yb-muted">Status</th><th className="w-[150px] border-b border-yb-line px-[12px] py-[7px] text-right text-[11px] font-bold text-yb-muted">Created by</th></tr></thead>
-          <tbody>{groups.map((group) => <tr key={group.id} className="hover:bg-yb-row-hover"><td className="border-b border-yb-line-row px-[12px] py-[9px]"><div className="font-bold text-yb-green underline">{group.name}</div><div className="mt-[2px] truncate font-mono text-[10px] text-yb-muted4">{group.whatsappGroupId ?? "Provider ID pending"}</div></td><td className="border-b border-yb-line-row px-[12px] py-[9px]">{group.clientName}</td><td className="border-b border-yb-line-row px-[12px] py-[9px]"><div className="font-bold">{group.requestNumber}</div><div className="mt-[2px] truncate text-[11px] text-yb-muted3">{group.tripSummary}</div></td><td className="border-b border-yb-line-row px-[12px] py-[9px] text-yb-ink2">{group.participants.length === 0 ? "—" : `${group.participants.length} (${group.participants.filter((p) => p.type === "traveller").length} travellers, ${group.participants.filter((p) => p.type === "staff").length} staff)`}</td><td className="border-b border-yb-line-row px-[12px] py-[9px]">{group.status === "active" ? <span className="inline-flex items-center gap-[5px] text-yb-green"><span className="h-[7px] w-[7px] rounded-full bg-[#2f8a4f]" />Active</span> : group.status === "failed" ? <span title={group.failureReason ?? undefined} className="font-bold text-yb-red">Failed</span> : <span className="font-bold text-yb-amber">Creating</span>}</td><td className="border-b border-yb-line-row px-[12px] py-[9px] text-right text-yb-muted3">{group.createdByName}</td></tr>)}</tbody>
+          <tbody>{groups.map((group) => <tr key={group.id} className="hover:bg-yb-row-hover"><td className="border-b border-yb-line-row px-[12px] py-[9px]">{group.conversationId !== null ? <Link to="/inbox" search={{ conversationId: group.conversationId }} className="font-bold text-yb-green underline">{group.name}</Link> : <div className="font-bold text-yb-muted3">{group.name}</div>}<div className="mt-[2px] truncate text-[10px] font-bold text-yb-muted3">{group.accountLabel}</div><div className="mt-[2px] truncate font-mono text-[10px] text-yb-muted4">{group.whatsappGroupId ?? "Provider ID pending"}</div>{group.conversationId !== null && <div className="mt-[3px] text-[10.5px] text-yb-muted3">Open conversation to read and send messages</div>}</td><td className="border-b border-yb-line-row px-[12px] py-[9px]">{group.clientName}</td><td className="border-b border-yb-line-row px-[12px] py-[9px]"><div className="font-bold">{group.requestNumber}</div><div className="mt-[2px] truncate text-[11px] text-yb-muted3">{group.tripSummary}</div></td><td className="border-b border-yb-line-row px-[12px] py-[9px] text-yb-ink2">{group.participants.length === 0 ? "—" : `${group.participants.length} (${group.participants.filter((p) => p.type === "traveller").length} travellers, ${group.participants.filter((p) => p.type === "staff").length} staff)`}</td><td className="border-b border-yb-line-row px-[12px] py-[9px]">{group.status === "active" ? <span className="inline-flex items-center gap-[5px] text-yb-green"><span className="h-[7px] w-[7px] rounded-full bg-[#2f8a4f]" />Active</span> : group.status === "failed" ? <span title={group.failureReason ?? undefined} className="font-bold text-yb-red">Failed</span> : <span className="font-bold text-yb-amber">Creating</span>}</td><td className="border-b border-yb-line-row px-[12px] py-[9px] text-right text-yb-muted3">{group.createdByName}</td></tr>)}</tbody>
         </table>
         {groupsQuery.isLoading && <div className="px-[14px] py-[28px] text-center text-[13px] text-yb-muted3">Loading groups…</div>}
         {!groupsQuery.isLoading && groups.length === 0 && <div className="px-[14px] py-[28px] text-center text-[13px] text-yb-muted3">No WhatsApp groups have been created from YB Travel yet.</div>}

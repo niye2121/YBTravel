@@ -1,4 +1,4 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { Pool } from "pg";
 import { PG_POOL } from "../../database/database.module";
 import { recordAudit } from "../../database/audit";
@@ -21,6 +21,17 @@ export type BookingFeeGroup = {
 };
 
 export type BookingFeeGroupInput = Omit<BookingFeeGroup, "id" | "createdAt" | "updatedAt">;
+export type PassengerCategory = "adult" | "child" | "infant";
+export type RequestBookingFee = {
+  requestId: number;
+  feeGroup: BookingFeeGroup;
+  availableTravellers: Array<{ id: number; name: string; dob: string | null }>;
+  passengers: Array<{ travellerId: number; name: string; category: PassengerCategory; charged: boolean; feeAmount: string }>;
+  chargedUnits: number;
+  totalAmount: string;
+  currency: string;
+  calculatedAt: string | null;
+};
 
 type BookingFeeGroupRow = {
   id: number;
@@ -213,5 +224,88 @@ export class BookingFeesService {
     } finally {
       client.release();
     }
+  }
+
+  async getRequestFee(requestId: number): Promise<RequestBookingFee> {
+    const context = await this.requestContext(requestId);
+    const selected = await this.pool.query<{ traveller_id: number; name: string; passenger_category: PassengerCategory }>(
+      `SELECT rt.traveller_id, t.name, rt.passenger_category
+       FROM travel_request_travellers rt JOIN travellers t ON t.id = rt.traveller_id
+       WHERE rt.travel_request_id = $1 ORDER BY t.name, t.id`, [requestId]);
+    const latest = await this.pool.query<{ line_items: any[]; charged_units: number; total_amount: string; calculated_at: string;
+      fee_group_name: string; fee_group_code: string; amount: string; currency: string; calculation_basis: CalculationBasis }>(
+      `SELECT line_items, charged_units, total_amount::text, calculated_at, fee_group_name,
+              fee_group_code, amount::text, currency, calculation_basis
+       FROM request_booking_fee_quotes WHERE travel_request_id = $1
+       ORDER BY calculated_at DESC, id DESC LIMIT 1`, [requestId]);
+    const latestRow = latest.rows[0];
+    const quoted = new Map((latestRow?.line_items ?? []).map((item) => [Number(item.travellerId), item]));
+    return {
+      requestId,
+      feeGroup: latestRow ? { ...context.feeGroup, name: latestRow.fee_group_name, code: latestRow.fee_group_code,
+        amount: latestRow.amount, currency: latestRow.currency, calculationBasis: latestRow.calculation_basis } : context.feeGroup,
+      availableTravellers: context.travellers,
+      passengers: selected.rows.map((item) => ({ travellerId: item.traveller_id, name: item.name,
+        category: item.passenger_category, charged: Boolean(quoted.get(item.traveller_id)?.charged),
+        feeAmount: String(quoted.get(item.traveller_id)?.feeAmount ?? "0.00") })),
+      chargedUnits: latestRow?.charged_units ?? 0,
+      totalAmount: latestRow?.total_amount ?? "0.00",
+      currency: context.feeGroup.currency,
+      calculatedAt: latestRow?.calculated_at ?? null,
+    };
+  }
+
+  async saveRequestFee(requestId: number, passengers: Array<{ travellerId: number; category: PassengerCategory }>, actorUserId: number): Promise<RequestBookingFee> {
+    if (passengers.length === 0) throw new BadRequestException("Select at least one traveller");
+    if (new Set(passengers.map((item) => item.travellerId)).size !== passengers.length) throw new BadRequestException("A traveller can be selected only once");
+    const context = await this.requestContext(requestId);
+    const available = new Map(context.travellers.map((item) => [item.id, item]));
+    for (const passenger of passengers) if (!available.has(passenger.travellerId)) throw new BadRequestException("Every selected traveller must belong to this client");
+    const group = context.feeGroup;
+    const isCharged = (category: PassengerCategory) => category === "adult" ? group.chargeAdults : category === "child" ? group.chargeChildren : group.chargeInfants;
+    const chargedUnits = group.calculationBasis === "per_booking" ? 1 : passengers.filter((item) => isCharged(item.category)).length;
+    const amountCents = Math.round(Number(group.amount) * 100);
+    const totalAmount = ((amountCents * chargedUnits) / 100).toFixed(2);
+    const lineItems = passengers.map((item) => {
+      const charged = group.calculationBasis === "per_passenger" && isCharged(item.category);
+      return { travellerId: item.travellerId, name: available.get(item.travellerId)!.name,
+        category: item.category, charged, feeAmount: charged ? Number(group.amount).toFixed(2) : "0.00" };
+    });
+    const db = await this.pool.connect();
+    try {
+      await db.query("BEGIN");
+      await db.query("DELETE FROM travel_request_travellers WHERE travel_request_id = $1", [requestId]);
+      for (const item of passengers) await db.query(
+        `INSERT INTO travel_request_travellers (travel_request_id, traveller_id, passenger_category, added_by)
+         VALUES ($1,$2,$3,$4)`, [requestId, item.travellerId, item.category, actorUserId]);
+      const quote = (await db.query(
+        `INSERT INTO request_booking_fee_quotes
+           (travel_request_id, booking_fee_group_id, fee_group_name, fee_group_code, amount, currency,
+            calculation_basis, passenger_count, charged_units, total_amount, line_items, calculated_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12) RETURNING id`,
+        [requestId, group.id, group.name, group.code, group.amount, group.currency, group.calculationBasis,
+         passengers.length, chargedUnits, totalAmount, JSON.stringify(lineItems), actorUserId])).rows[0];
+      await db.query("UPDATE travel_requests SET passenger_count = $2, updated_at = now() WHERE id = $1", [requestId, passengers.length]);
+      await recordAudit(db, actorUserId, "travel_request.booking_fee_calculated", "travel_request", requestId, null,
+        { quoteId: String(quote.id), feeGroupId: group.id, passengerCount: passengers.length, chargedUnits, totalAmount, currency: group.currency });
+      await db.query("COMMIT");
+      return this.getRequestFee(requestId);
+    } catch (error) { await db.query("ROLLBACK"); throw error; } finally { db.release(); }
+  }
+
+  private async requestContext(requestId: number): Promise<{ feeGroup: BookingFeeGroup; travellers: Array<{ id: number; name: string; dob: string | null }> }> {
+    const result = await this.pool.query<BookingFeeGroupRow & { client_id: number }>(
+      `SELECT b.id, b.name, b.code, b.amount::text, b.currency, b.calculation_basis,
+              b.charge_adults, b.charge_children, b.charge_infants, b.active, b.created_at, b.updated_at,
+              r.client_id
+       FROM travel_requests r JOIN clients c ON c.id = r.client_id
+       JOIN booking_fee_groups b ON b.id = c.booking_fee_group_id WHERE r.id = $1`, [requestId]);
+    const row = result.rows[0];
+    if (!row) throw new NotFoundException("Request or client booking-fee group not found");
+    const travellers = await this.pool.query<{ id: number; name: string; dob: string | null }>(
+      `SELECT t.id, t.name, to_char(t.dob, 'YYYY-MM-DD') AS dob
+       FROM travellers t JOIN traveller_accounts a ON a.traveller_id = t.id
+       WHERE a.client_id = $1 ORDER BY t.name, t.id`, [row.client_id]);
+    return { feeGroup: toBookingFeeGroup(row), travellers: travellers.rows };
   }
 }

@@ -13,7 +13,10 @@ import {
 import { z, ZodError } from "zod";
 import type { Client } from "@yb-travel/shared";
 import { AuthGuard, type AuthenticatedRequest } from "../auth/auth.guard";
+import { AllowedRoles } from "../auth/allowed-roles.decorator";
+import { RoleGuard } from "../auth/role.guard";
 import { ClientsService, type ClientTravellerRow } from "./clients.service";
+import { OnboardingService } from "./onboarding.service";
 
 /**
  * Defined locally rather than imported from @yb-travel/shared — see the
@@ -43,6 +46,13 @@ const updateClientSchema = z.object({
   secondaryRepId: z.number().int().positive().nullable(),
   bookingFeeGroupId: z.number().int().positive(),
   stage: z.string().trim().min(1, "Onboarding stage is required").max(50),
+  onboardingTransitionReason: z.string().trim().max(500).nullable().optional(),
+});
+
+const reviewInformationSchema = z.object({
+  requirementFieldId: z.number().int().positive(),
+  entityType: z.enum(["client", "traveller"]),
+  entityId: z.number().int().positive(),
 });
 
 /**
@@ -54,7 +64,10 @@ const updateClientSchema = z.object({
 @Controller("clients")
 @UseGuards(AuthGuard)
 export class ClientsController {
-  constructor(private readonly clientsService: ClientsService) {}
+  constructor(
+    private readonly clientsService: ClientsService,
+    private readonly onboarding: OnboardingService,
+  ) {}
 
   @Get()
   list(): Promise<Client[]> {
@@ -77,6 +90,8 @@ export class ClientsController {
   }
 
   @Patch(":id")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
   update(
     @Param("id", ParseIntPipe) id: number,
     @Req() request: AuthenticatedRequest,
@@ -88,6 +103,41 @@ export class ClientsController {
       if (err instanceof ZodError) throw new BadRequestException(err.flatten().fieldErrors);
       throw err;
     }
+  }
+
+  @Get(":id/onboarding-status")
+  getOnboardingStatus(@Param("id", ParseIntPipe) id: number) {
+    return this.onboarding.getClientStatus(id);
+  }
+
+  @Post(":id/information/review")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  reviewInformation(
+    @Param("id", ParseIntPipe) id: number,
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ) {
+    try {
+      const input = reviewInformationSchema.parse(body);
+      return this.onboarding.reviewClientField(
+        id, input.requirementFieldId, input.entityType, input.entityId, request.user.id,
+      );
+    } catch (error) {
+      if (error instanceof ZodError) throw new BadRequestException(error.flatten().fieldErrors);
+      throw error;
+    }
+  }
+
+  @Post(":id/onboarding-tasks/:taskId/complete")
+  @UseGuards(RoleGuard)
+  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  completeOnboardingTask(
+    @Param("id", ParseIntPipe) id: number,
+    @Param("taskId", ParseIntPipe) taskId: number,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.onboarding.completeTask(id, taskId, request.user.id);
   }
 
   @Get(":id/travellers")

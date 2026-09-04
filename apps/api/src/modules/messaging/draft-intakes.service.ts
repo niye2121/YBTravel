@@ -373,6 +373,13 @@ export class DraftIntakesService {
     if (!requestId) {
       const created = await this.requests.create(
         clientId, before.summary.trim(), actorUserId, before.requestTypeId, before.urgencyLevelId, id,
+        {
+          passengerCount: before.passengerCount,
+          origin: before.origin,
+          destination: before.destination,
+          departureDateText: before.departureDateText,
+          returnDateText: before.returnDateText,
+        },
       );
       requestId = created.id;
     }

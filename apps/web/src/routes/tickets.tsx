@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { AppHeader } from "../components/AppShell/AppHeader";
 import { FilterStrip } from "../components/AppShell/FilterStrip";
 import { SecondaryButton } from "../components/AppShell/buttons";
+import { ImplementationStatusIcon } from "../components/ImplementationStatusIcon";
 import { TICKETS, TICKET_FILTERS, money, type TicketRow, type TicketStatus } from "../data/ticketsData";
 import { NAV_TABS } from "../lib/navTabs";
 
@@ -57,11 +58,12 @@ function TicketsPage() {
         </div>
         <div className="flex-1" />
         <div className="flex items-center gap-[10px]">
-          <SecondaryButton>Export ▾</SecondaryButton>
+          <SecondaryButton className="group/status-parent flex items-center gap-[7px]" aria-disabled="true">Export ▾ <ImplementationStatusIcon label="Coming in Phase 3" description="Ticket export will be added with the live Sabre ticketing workflow." withinInteractiveControl /></SecondaryButton>
         </div>
       </div>
 
-      <div className="mx-[22px] mt-[-4px] mb-4 px-[22px] text-[12.5px] text-yb-muted3">
+      <div className="mx-[22px] mt-[-4px] mb-4 flex items-center gap-[7px] px-[22px] text-[12.5px] text-yb-muted3">
+        <ImplementationStatusIcon label="Coming in Phase 3" description="This page uses demonstration data and requires the Sabre connection." />
         Preview only — Sabre isn't connected yet (Phase 3 is gated on commercial access being
         confirmed), so issuance, reissue and void/refund aren't available from this screen.
       </div>

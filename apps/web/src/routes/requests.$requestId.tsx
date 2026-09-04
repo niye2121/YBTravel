@@ -4,8 +4,9 @@ import { useEffect, useState, type ReactNode } from "react";
 import { AppHeader } from "../components/AppShell/AppHeader";
 import { GROUPS, money, type RequestRow } from "../data/requestsData";
 import { useAuth } from "../lib/AuthContext";
-import { messagingApi, requestsApi } from "../lib/api";
+import { bookingFeesApi, messagingApi, requestsApi, type PassengerCategory, type RequestDetailsInput } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
+import { EntityRecordsPanel } from "../components/EntityRecordsPanel";
 
 export const Route = createFileRoute("/requests/$requestId")({ component: RequestDetailPage });
 
@@ -91,6 +92,18 @@ function RequestDetailPage() {
   const [query, setQuery] = useState("");
   const [selectedAssigneeId, setSelectedAssigneeId] = useState("");
   const [proposedReply, setProposedReply] = useState("");
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [details, setDetails] = useState<RequestDetailsInput>({
+    passengerCount: null,
+    origin: null,
+    destination: null,
+    departureDateText: null,
+    returnDateText: null,
+    cabinClass: null,
+    flexibility: null,
+    specialRequests: null,
+  });
+  const [feePassengers, setFeePassengers] = useState<Record<number, PassengerCategory>>({});
   const requestQuery = useQuery({
     queryKey: ["requests", requestId],
     queryFn: () => requestsApi.getById(requestId),
@@ -98,6 +111,17 @@ function RequestDetailPage() {
     retry: false,
   });
   const request = requestQuery.data;
+  const informationQuery = useQuery({
+    queryKey: ["requests", requestId, "information-status"],
+    queryFn: () => requestsApi.getInformationStatus(requestId),
+    enabled: Boolean(request),
+    retry: false,
+  });
+  const bookingFeeQuery = useQuery({
+    queryKey: ["requests", requestId, "booking-fee"],
+    queryFn: () => bookingFeesApi.getRequestFee(requestId),
+    enabled: Boolean(request), retry: false,
+  });
   const mayManageAssignments = user?.roles.some(
     (role) => role === "system_administrator" || role === "offshore_intake_employee",
   ) ?? false;
@@ -142,6 +166,28 @@ function RequestDetailPage() {
       });
     },
   });
+  const updateDetailsMutation = useMutation({
+    mutationFn: (input: RequestDetailsInput) => requestsApi.updateDetails(requestId, input),
+    onSuccess: async (updated) => {
+      queryClient.setQueryData(["requests", requestId], updated);
+      setEditingDetails(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["requests"] }),
+        queryClient.invalidateQueries({ queryKey: ["requests", requestId, "information-status"] }),
+      ]);
+    },
+  });
+  const reviewInformationMutation = useMutation({
+    mutationFn: (requirementFieldId: number) => requestsApi.reviewInformation(requestId, requirementFieldId),
+    onSuccess: (status) => queryClient.setQueryData(["requests", requestId, "information-status"], status),
+  });
+  const bookingFeeMutation = useMutation({
+    mutationFn: () => bookingFeesApi.saveRequestFee(requestId, Object.entries(feePassengers).map(([travellerId, category]) => ({ travellerId: Number(travellerId), category }))),
+    onSuccess: (fee) => {
+      queryClient.setQueryData(["requests", requestId, "booking-fee"], fee);
+      void queryClient.invalidateQueries({ queryKey: ["requests", requestId] });
+    },
+  });
 
   useEffect(() => {
     setSelectedAssigneeId(request?.assignedUserId ? String(request.assignedUserId) : "");
@@ -151,6 +197,25 @@ function RequestDetailPage() {
     setProposedReply(request?.proposedReply ?? "");
     sendReplyMutation.reset();
   }, [request?.id, request?.proposedReply]);
+
+  useEffect(() => {
+    if (!request) return;
+    setDetails({
+      passengerCount: request.passengerCount,
+      origin: request.origin,
+      destination: request.destination,
+      departureDateText: request.departureDateText,
+      returnDateText: request.returnDateText,
+      cabinClass: request.cabinClass,
+      flexibility: request.flexibility,
+      specialRequests: request.specialRequests,
+    });
+  }, [request]);
+
+  useEffect(() => {
+    if (!bookingFeeQuery.data) return;
+    setFeePassengers(Object.fromEntries(bookingFeeQuery.data.passengers.map((item) => [item.travellerId, item.category])));
+  }, [bookingFeeQuery.data]);
 
   return (
     <div className="yb-reference-scale min-h-screen min-w-[1180px] bg-[#eef0ea] font-[Helvetica,Arial,sans-serif] leading-[1.25] text-[#1c1f1b]">
@@ -219,6 +284,92 @@ function RequestDetailPage() {
                     <DetailField label="Response due">{dateTimeLabel(request.responseDueAt)}</DetailField>
                     <DetailField label="Service due">{dateTimeLabel(request.serviceDueAt)}</DetailField>
                     <DetailField label="Created">{dateTimeLabel(request.createdAt)}</DetailField>
+                  </div>
+
+                  <div className="mt-[22px] border-t border-[#d7dcd5] pt-[16px]">
+                    <div className="flex items-start gap-[10px]">
+                      <div>
+                        <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Travel information</div>
+                        <div className="mt-[3px] text-[11px] text-[#6c766f]">Complete the structured details, then confirm any fields that require staff review.</div>
+                      </div>
+                      <div className="flex-1" />
+                      <button type="button" onClick={() => setEditingDetails((value) => !value)} className="border border-[#8d968e] bg-white px-[11px] py-[5px] text-[11px] font-bold text-[#2c332d] hover:bg-[#f0f2ed]">{editingDetails ? "Cancel" : "Edit information"}</button>
+                    </div>
+
+                    {editingDetails ? (
+                      <form className="mt-[10px] grid grid-cols-3 gap-[10px] border border-[#cbd3ca] bg-[#f9faf8] p-[12px]" onSubmit={(event) => { event.preventDefault(); updateDetailsMutation.mutate(details); }}>
+                        <label className="text-[11px] font-bold">Passengers<input type="number" min={1} max={100} value={details.passengerCount ?? ""} onChange={(event) => setDetails({ ...details, passengerCount: event.target.value ? Number(event.target.value) : null })} className="mt-[4px] h-[30px] w-full border border-[#9aa29a] bg-white px-[7px] text-[12px] font-normal" /></label>
+                        <label className="text-[11px] font-bold">Origin<input value={details.origin ?? ""} onChange={(event) => setDetails({ ...details, origin: event.target.value || null })} placeholder="JFK / New York" className="mt-[4px] h-[30px] w-full border border-[#9aa29a] bg-white px-[7px] text-[12px] font-normal" /></label>
+                        <label className="text-[11px] font-bold">Destination<input value={details.destination ?? ""} onChange={(event) => setDetails({ ...details, destination: event.target.value || null })} placeholder="TLV / Tel Aviv" className="mt-[4px] h-[30px] w-full border border-[#9aa29a] bg-white px-[7px] text-[12px] font-normal" /></label>
+                        <label className="text-[11px] font-bold">Departure date / window<input value={details.departureDateText ?? ""} onChange={(event) => setDetails({ ...details, departureDateText: event.target.value || null })} placeholder="20 Sep or nearby" className="mt-[4px] h-[30px] w-full border border-[#9aa29a] bg-white px-[7px] text-[12px] font-normal" /></label>
+                        <label className="text-[11px] font-bold">Return date / window<input value={details.returnDateText ?? ""} onChange={(event) => setDetails({ ...details, returnDateText: event.target.value || null })} placeholder="After Sukkot" className="mt-[4px] h-[30px] w-full border border-[#9aa29a] bg-white px-[7px] text-[12px] font-normal" /></label>
+                        <label className="text-[11px] font-bold">Cabin class<input value={details.cabinClass ?? ""} onChange={(event) => setDetails({ ...details, cabinClass: event.target.value || null })} placeholder="Economy" className="mt-[4px] h-[30px] w-full border border-[#9aa29a] bg-white px-[7px] text-[12px] font-normal" /></label>
+                        <label className="text-[11px] font-bold">Flexibility<input value={details.flexibility ?? ""} onChange={(event) => setDetails({ ...details, flexibility: event.target.value || null })} placeholder="±2 days" className="mt-[4px] h-[30px] w-full border border-[#9aa29a] bg-white px-[7px] text-[12px] font-normal" /></label>
+                        <label className="col-span-2 text-[11px] font-bold">Special requests<input value={details.specialRequests ?? ""} onChange={(event) => setDetails({ ...details, specialRequests: event.target.value || null })} placeholder="Meals, accessibility, seating…" className="mt-[4px] h-[30px] w-full border border-[#9aa29a] bg-white px-[7px] text-[12px] font-normal" /></label>
+                        <div className="col-span-3 flex items-center justify-end gap-[9px]">
+                          {updateDetailsMutation.isError && <span className="text-[11px] text-[#b3261e]">{updateDetailsMutation.error instanceof Error ? updateDetailsMutation.error.message : "Could not save"}</span>}
+                          <button type="submit" disabled={updateDetailsMutation.isPending} className="h-[30px] bg-[#0b5c3b] px-[14px] text-[11px] font-bold text-white disabled:opacity-50">{updateDetailsMutation.isPending ? "Saving…" : "Save information"}</button>
+                        </div>
+                      </form>
+                    ) : (
+                      <div className="mt-[10px] grid grid-cols-4 gap-x-[18px] gap-y-[12px] border border-[#d7dcd5] bg-[#f9faf8] p-[12px]">
+                        <DetailField label="Passengers">{request.passengerCount ?? "—"}</DetailField>
+                        <DetailField label="Origin">{request.origin ?? "—"}</DetailField>
+                        <DetailField label="Destination">{request.destination ?? "—"}</DetailField>
+                        <DetailField label="Cabin">{request.cabinClass ?? "—"}</DetailField>
+                        <DetailField label="Departure">{request.departureDateText ?? "—"}</DetailField>
+                        <DetailField label="Return">{request.returnDateText ?? "—"}</DetailField>
+                        <DetailField label="Flexibility">{request.flexibility ?? "—"}</DetailField>
+                        <DetailField label="Special requests">{request.specialRequests ?? "—"}</DetailField>
+                      </div>
+                    )}
+
+                    {informationQuery.data && (
+                      <div className="mt-[10px] border border-[#d7dcd5]">
+                        <div className="flex items-center bg-[#eff2ec] px-[10px] py-[6px]">
+                          <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#5c665e]">Information checklist</div>
+                          <div className="flex-1" />
+                          <span className={`px-[6px] py-[2px] text-[9.5px] font-bold ${informationQuery.data.complete ? "bg-[#e8f5eb] text-[#0b5c3b]" : "bg-[#fff3d5] text-[#7b5b00]"}`}>{informationQuery.data.complete ? "COMPLETE" : `${informationQuery.data.missingItems.length} ACTIONS NEEDED`}</span>
+                        </div>
+                        {informationQuery.data.checklist.map((item) => (
+                          <div key={item.requirementFieldId} className="flex items-center gap-[9px] border-t border-[#edf0ea] px-[10px] py-[7px]">
+                            <span className={`h-[8px] w-[8px] rounded-full ${!item.required && !item.present ? "bg-[#aab1aa]" : item.satisfied ? "bg-[#249155]" : item.present ? "bg-[#d89b13]" : "bg-[#b63a2b]"}`} />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-[11.5px] font-bold">{item.label}</div>
+                              <div className="truncate text-[10px] text-[#6c766f]">{item.present ? item.valueSummary : item.required ? "Missing" : "Optional · not provided"}{item.reviewed ? ` · reviewed${item.reviewedByName ? ` by ${item.reviewedByName}` : ""}` : item.present && item.requiresReview ? " · review required" : ""}</div>
+                            </div>
+                            {item.present && item.requiresReview && !item.reviewed && <button type="button" disabled={reviewInformationMutation.isPending} onClick={() => reviewInformationMutation.mutate(item.requirementFieldId)} className="border border-[#0b5c3b] bg-white px-[8px] py-[4px] text-[10px] font-bold text-[#0b5c3b] disabled:opacity-50">Confirm reviewed</button>}
+                          </div>
+                        ))}
+                        <div className="border-t border-[#d7dcd5] bg-[#fafbf9] px-[10px] py-[6px] text-[10.5px] font-bold text-[#59635b]">Next: {informationQuery.data.nextAction}</div>
+                      </div>
+                    )}
+                    {informationQuery.isError && <div className="mt-[8px] text-[11px] text-[#b3261e]">Information checklist could not be loaded.</div>}
+                    {reviewInformationMutation.isError && <div className="mt-[8px] text-[11px] text-[#b3261e]">{reviewInformationMutation.error instanceof Error ? reviewInformationMutation.error.message : "Review could not be saved"}</div>}
+                  </div>
+
+                  <div className="mt-[22px] border-t border-[#d7dcd5] pt-[16px]">
+                    <div className="flex items-start gap-[10px]"><div><div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Booking fee by passenger</div><div className="mt-[3px] text-[11px] text-[#6c766f]">Select the travellers on this request and confirm their fee category. Saving creates a dated fee snapshot.</div></div><div className="flex-1" />
+                      {bookingFeeQuery.data && <div className="text-right"><div className="text-[10px] text-[#6c766f]">{bookingFeeQuery.data.feeGroup.name} · {bookingFeeQuery.data.feeGroup.calculationBasis.replace("_", " ")}</div><div className="text-[18px] font-bold text-[#0b5c3b]">{bookingFeeQuery.data.currency} {bookingFeeQuery.data.totalAmount}</div></div>}
+                    </div>
+                    {bookingFeeQuery.isLoading && <div className="mt-[9px] text-[11px] text-[#6c766f]">Loading client travellers and fee rule…</div>}
+                    {bookingFeeQuery.isError && <div className="mt-[9px] text-[11px] text-[#b3261e]">The client needs a valid booking-fee group before this can be calculated.</div>}
+                    {bookingFeeQuery.data && (
+                      <div className="mt-[10px] border border-[#d7dcd5]">
+                        {bookingFeeQuery.data.availableTravellers.map((traveller) => {
+                          const category = feePassengers[traveller.id];
+                          return <div key={traveller.id} className="flex items-center gap-[10px] border-b border-[#edf0ea] px-[10px] py-[7px] last:border-b-0">
+                            <input aria-label={`Include ${traveller.name}`} type="checkbox" checked={Boolean(category)} onChange={(event) => setFeePassengers((current) => { const next = { ...current }; if (event.target.checked) next[traveller.id] = "adult"; else delete next[traveller.id]; return next; })} />
+                            <div className="min-w-0 flex-1"><div className="text-[11.5px] font-bold">{traveller.name}</div><div className="text-[9.5px] text-[#6c766f]">DOB {traveller.dob ?? "not recorded"}</div></div>
+                            <select aria-label={`${traveller.name} passenger category`} disabled={!category} value={category ?? "adult"} onChange={(event) => setFeePassengers((current) => ({ ...current, [traveller.id]: event.target.value as PassengerCategory }))} className="h-[28px] border border-[#9aa29a] bg-white px-[7px] text-[10.5px]"><option value="adult">Adult</option><option value="child">Child</option><option value="infant">Infant</option></select>
+                            {bookingFeeQuery.data.passengers.find((item) => item.travellerId === traveller.id) && <div className="w-[95px] text-right text-[10.5px] font-bold">{bookingFeeQuery.data.currency} {bookingFeeQuery.data.passengers.find((item) => item.travellerId === traveller.id)!.feeAmount}</div>}
+                          </div>;
+                        })}
+                        {bookingFeeQuery.data.availableTravellers.length === 0 && <div className="p-[10px] text-[11px] text-[#6c766f]">Add travellers to the client profile first.</div>}
+                        <div className="flex items-center border-t border-[#d7dcd5] bg-[#f9faf8] px-[10px] py-[7px]"><div className="text-[10px] text-[#6c766f]">{bookingFeeQuery.data.calculatedAt ? `Last calculated ${dateTimeLabel(bookingFeeQuery.data.calculatedAt)}` : "Not calculated yet"}</div><div className="flex-1" /><button type="button" disabled={Object.keys(feePassengers).length === 0 || bookingFeeMutation.isPending} onClick={() => bookingFeeMutation.mutate()} className="h-[29px] bg-[#0b5c3b] px-[12px] text-[10.5px] font-bold text-white disabled:opacity-50">{bookingFeeMutation.isPending ? "Calculating…" : "Save fee calculation"}</button></div>
+                      </div>
+                    )}
+                    {bookingFeeMutation.isError && <div className="mt-[7px] text-[11px] text-[#b3261e]">{bookingFeeMutation.error instanceof Error ? bookingFeeMutation.error.message : "Fee calculation failed"}</div>}
                   </div>
 
                   <div className="mt-[22px] border-t border-[#d7dcd5] pt-[16px]">
@@ -357,11 +508,23 @@ function RequestDetailPage() {
                     )}
                   </div>
                   <div className="mt-[17px] border-t border-[#d7dcd5] pt-[12px]">
-                    <Link to="/clients/$clientId" params={{ clientId: String(request.clientId) }} className="block border border-[#9aa29a] bg-white px-[10px] py-[7px] text-[11.5px] text-[#2c332d] hover:bg-[#f0f2ed]">View client profile</Link>
+                    <div className="flex flex-col gap-[6px]">
+                      {request.sourceConversationId && (
+                        <Link
+                          to="/inbox"
+                          search={{ conversationId: request.sourceConversationId }}
+                          className="block bg-[#0b5c3b] px-[10px] py-[7px] text-[11.5px] font-bold text-white hover:bg-[#084a30]"
+                        >
+                          Open client inbox
+                        </Link>
+                      )}
+                      <Link to="/clients/$clientId" params={{ clientId: String(request.clientId) }} className="block border border-[#9aa29a] bg-white px-[10px] py-[7px] text-[11.5px] text-[#2c332d] hover:bg-[#f0f2ed]">View client profile</Link>
+                    </div>
                   </div>
                 </aside>
               </div>
             </section>
+            <EntityRecordsPanel entity="request" id={requestId} />
           </>
         )}
       </main>
