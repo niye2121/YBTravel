@@ -276,7 +276,7 @@ function InboxPage() {
   });
   const templatesQuery = useQuery({ queryKey: ["message-templates", "active"], queryFn: messageTemplatesApi.listActive });
   const reconnectMutation = useMutation({
-    mutationFn: () => messagingApi.reconnectAccount(selectedAccountId as number),
+    mutationFn: (accountId: number) => messagingApi.reconnectAccount(accountId),
     onSuccess: (nextStatus) => {
       queryClient.setQueryData(["messaging", "status"], nextStatus);
       queryClient.invalidateQueries({ queryKey: ["messaging", "accounts"] });
@@ -576,7 +576,10 @@ function InboxPage() {
                 <p className="max-w-[560px] text-[14px] text-yb-muted3">
                   Restoring the saved WhatsApp session first. If WhatsApp no longer accepts it, a new QR code will appear here automatically.
                 </p>
-                <PrimaryButton onClick={() => reconnectMutation.mutate()} disabled={reconnectMutation.isPending}>
+                <PrimaryButton
+                  onClick={() => { if (status) reconnectMutation.mutate(status.id); }}
+                  disabled={!status || reconnectMutation.isPending}
+                >
                   {reconnectMutation.isPending ? "Restoring…" : "Try connection again"}
                 </PrimaryButton>
                 {reconnectMutation.isError && (

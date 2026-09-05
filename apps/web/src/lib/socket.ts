@@ -2,6 +2,9 @@ import { type Socket, io } from "socket.io-client";
 import { getToken } from "./session";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
+const SOCKET_URL = API_URL.startsWith("/") && typeof window !== "undefined"
+  ? window.location.origin
+  : API_URL;
 
 let socket: Socket | null = null;
 
@@ -12,7 +15,7 @@ export function getSocket(): Socket {
   }
 
   if (!socket) {
-    socket = io(API_URL, {
+    socket = io(SOCKET_URL, {
       transports: ["websocket"],
       auth: { token },
     });

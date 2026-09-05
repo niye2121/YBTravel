@@ -51,7 +51,9 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        VITE_API_URL: http://2.24.28.178:4001
+        # Keep browser requests on the same origin. Vite preview proxies
+        # /api and /socket.io to the private API service below.
+        VITE_API_URL: /api
     restart: unless-stopped
     ports:
       - "4173:4173"

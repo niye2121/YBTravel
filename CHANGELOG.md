@@ -4,6 +4,14 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-09-05 — Restore production QR/status access through the same-origin proxy
+
+**What changed:** production web builds now use `/api`, while Vite preview proxies `/api` REST requests and `/socket.io` WebSocket traffic to the private API container. The Socket.IO client connects to the page origin when the API base is relative. The Inbox reconnect action now submits the loaded status object's account ID and stays disabled until that account is available.
+
+**Why:** a server-only domain configuration changed `VITE_API_URL` to `/api` without adding a preview proxy. Browsers consequently requested API routes from the web server and displayed `API unavailable` or `Disconnected`, even while the API and WhatsApp runtime were healthy. The reconnect button also had a short loading window in which it could submit a null account ID.
+
+**Expected result:** both the direct server preview and configured domain can reach the API through their own origin. If WhatsApp genuinely logs out, the existing backend recovery creates a fresh QR and the Inbox can retrieve and display it without deleting message history.
+
 ## 2026-09-04 — Add multiple WhatsApp profiles locally
 
 **What changed:** administrators can now open Setup → WhatsApp Accounts, retain the existing number as the Primary WhatsApp profile, and add independently named accounts. Each account has its own QR code, connection status, phone number, reconnect action, disconnect action, live Baileys socket, and authentication directory. The Inbox includes an account selector, filters conversations by profile, starts new conversations from the selected number, and routes text replies and voice notes through the account that owns the conversation. Managed groups also require and retain an owning account.
