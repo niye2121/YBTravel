@@ -249,6 +249,8 @@ function InboxPage() {
   const [conversationFilter, setConversationFilter] = useState<ConversationFilter>("all");
   const [readConversationIds, setReadConversationIds] = useState<Set<number>>(() => new Set());
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
+  const [detailsPanelOpen, setDetailsPanelOpen] = useState(true);
+  const draftReplySelectedRef = useRef(false);
 
   const statusQuery = useQuery({
     queryKey: ["messaging", "status"],
@@ -311,6 +313,10 @@ function InboxPage() {
     mutationFn: (text: string) => messagingApi.sendMessage(selectedId as number, text),
     onSuccess: () => {
       setReply("");
+      if (draftReplySelectedRef.current) {
+        setDetailsPanelOpen(false);
+        draftReplySelectedRef.current = false;
+      }
       if (selectedId !== null) {
         queryClient.invalidateQueries({
           queryKey: ["messaging", "conversations", selectedId, "messages"],
@@ -383,6 +389,11 @@ function InboxPage() {
   }, [queryClient]);
 
   useEffect(() => { setTemplateId(""); setTemplateWarning(null); }, [selectedId]);
+
+  useEffect(() => {
+    setDetailsPanelOpen(true);
+    draftReplySelectedRef.current = false;
+  }, [selectedId]);
 
   useEffect(() => {
     if (selectedAccountId !== null || !accountsQuery.data?.length) return;
@@ -592,7 +603,7 @@ function InboxPage() {
           </Panel>
           </div>
           )}
-          <div className="grid h-[calc(100vh-190px)] min-h-[520px] max-h-[700px] grid-cols-[minmax(230px,280px)_minmax(340px,1fr)_minmax(390px,430px)] overflow-hidden border border-yb-line bg-white">
+          <div className={`grid h-[calc(100vh-190px)] min-h-[520px] max-h-[700px] overflow-hidden border border-yb-line bg-white ${detailsPanelOpen ? "grid-cols-[minmax(230px,280px)_minmax(340px,1fr)_minmax(390px,430px)]" : "grid-cols-[minmax(230px,280px)_minmax(340px,1fr)]"}`}>
             <section className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-yb-line-soft">
               <div className="flex items-center border-b border-yb-line-soft bg-yb-panel-head px-[10px] py-[7px]">
                 <div className="text-[10.5px] font-bold tracking-[1.2px] text-yb-panel-head-text">CONVERSATIONS</div>
@@ -704,6 +715,15 @@ function InboxPage() {
                     <Link to="/whatsapp-groups" className="border border-yb-line-btn bg-white px-[11px] py-[5px] text-[11.5px] text-yb-ink2 hover:bg-yb-hover-btn">
                       {selectedGroup ? "Managed Group" : "Create Group"}
                     </Link>
+                    <button
+                      type="button"
+                      aria-expanded={detailsPanelOpen}
+                      aria-controls="inbox-details-panel"
+                      onClick={() => setDetailsPanelOpen((open) => !open)}
+                      className="border border-yb-line-btn bg-white px-[11px] py-[5px] text-[11.5px] text-yb-ink2 hover:bg-yb-hover-btn"
+                    >
+                      {detailsPanelOpen ? "Hide AI panel" : "Show AI panel"}
+                    </button>
                     <details className="relative">
                       <summary className="flex h-[28px] w-[32px] cursor-pointer list-none items-center justify-center border border-yb-line-btn bg-white text-[15px] text-yb-ink2 hover:bg-yb-hover-btn">…</summary>
                       <div className="absolute right-0 top-[32px] z-10 min-w-[145px] border border-yb-line-btn bg-white py-[4px] shadow-sm">
@@ -809,10 +829,16 @@ function InboxPage() {
               )}
             </section>
 
-            <aside className="min-h-0 min-w-0 overflow-y-auto overscroll-contain border-l border-yb-line-soft bg-yb-toolbar [scrollbar-gutter:stable]">
+            {detailsPanelOpen && <aside id="inbox-details-panel" className="min-h-0 min-w-0 overflow-y-auto overscroll-contain border-l border-yb-line-soft bg-yb-toolbar [scrollbar-gutter:stable]">
               <div className="border-b border-yb-line-soft bg-yb-panel-head px-[10px] py-[7px] text-[10.5px] font-bold tracking-[1.2px] text-yb-panel-head-text">AI DRAFT INTAKE</div>
               {selectedConversation && (
-                <DraftIntakePanel conversation={selectedConversation} onUseReply={setReply} />
+                <DraftIntakePanel
+                  conversation={selectedConversation}
+                  onUseReply={(value) => {
+                    setReply(value);
+                    draftReplySelectedRef.current = true;
+                  }}
+                />
               )}
               <div className="border-y border-yb-line-soft bg-yb-panel-head px-[10px] py-[7px] text-[10.5px] font-bold tracking-[1.2px] text-yb-panel-head-text">CONTEXT</div>
               {selectedConversation ? (
@@ -853,7 +879,7 @@ function InboxPage() {
               ) : (
                 <div className="px-[14px] py-[18px] text-[12px] leading-[18px] text-yb-muted3">Select a conversation to view its available client and request context.</div>
               )}
-            </aside>
+            </aside>}
           </div>
           </>
         )}

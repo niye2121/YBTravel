@@ -4,6 +4,12 @@ Every implemented change gets an entry here — what changed, and why. Newest fi
 
 ---
 
+## 2026-09-05 — Make the WhatsApp AI panel collapsible
+
+**What changed:** each conversation now has a **Hide AI panel / Show AI panel** control. Closing the side panel expands the message history and reply composer into the available space. When an employee selects **Use reply** and that reply is successfully sent, the panel closes automatically. Selecting another conversation opens it again so a new intake draft is not missed.
+
+**Why:** after an AI suggestion is copied and sent, leaving the large draft editor open reduces the useful chat area and makes the already-used suggestion look unfinished.
+
 ## 2026-09-05 — Restore production QR/status access through the same-origin proxy
 
 **What changed:** production web builds now use `/api`, while Vite preview proxies `/api` REST requests and `/socket.io` WebSocket traffic to the private API container. The Socket.IO client connects to the page origin when the API base is relative. The Inbox reconnect action now submits the loaded status object's account ID and stays disabled until that account is available.
