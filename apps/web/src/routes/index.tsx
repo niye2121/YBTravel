@@ -57,10 +57,10 @@ function DashboardPanel({ title, detail, action, children }: {
 }) {
   return (
     <section className="yb-card mb-[14px] overflow-hidden border border-yb-line bg-white">
-      <header className="flex min-h-[42px] items-center border-b border-yb-line-soft px-[14px]">
-        <div>
-          <h2 className="text-[11px] font-bold tracking-[1.15px] text-yb-panel-head-text">{title}</h2>
-          <p className="mt-[1px] text-[11px] text-yb-muted3">{detail}</p>
+      <header className="flex flex-wrap items-center gap-[10px] border-b border-yb-line bg-yb-panel-head px-[14px] py-[14px]">
+        <div className="min-w-0">
+          <h2 className="font-mono text-[10.5px] font-medium uppercase tracking-[0.12em] text-yb-muted3">{title}</h2>
+          <p className="mt-[4px] text-[12px] leading-[18px] text-yb-muted3">{detail}</p>
         </div>
         <div className="flex-1" />
         {action}
@@ -115,7 +115,7 @@ function HomePage() {
       can("workloads.manage") ? { label: "Reports", to: "/reports" as const } : null,
     ].filter((area): area is NonNullable<typeof area> => area !== null);
     return (
-      <div className="min-h-screen min-w-[1180px] bg-yb-canvas text-yb-ink">
+      <div className="yb-home min-h-screen bg-yb-canvas font-sans text-yb-ink">
         <AppHeader tabs={NAV_TABS} compact />
         <main className="px-[16px] pt-[14px] pb-[32px]">
           <section className="yb-card border border-yb-line border-t-[3px] border-t-yb-green bg-white px-[22px] py-[22px]">
@@ -135,24 +135,23 @@ function HomePage() {
   }
 
   return (
-    <div className="min-h-screen min-w-[1180px] bg-yb-canvas text-yb-ink">
+    <div className="yb-home min-h-screen bg-yb-canvas font-sans text-yb-ink">
       <AppHeader tabs={NAV_TABS} compact />
 
       <main className="px-[16px] pt-[14px] pb-[32px]">
-        <header className="mb-[14px] flex items-end gap-[12px]">
+        <header className="mb-[20px] flex flex-wrap items-end gap-[12px]">
           <div className="flex h-[22px] w-[22px] items-center justify-center border border-yb-line-btn bg-white" aria-hidden="true">
             <div className="h-[10px] w-[10px] bg-yb-gold" />
           </div>
-          <div>
+          <div className="min-w-0 flex-1">
             <div className="text-[10px] uppercase tracking-[1.4px] text-yb-muted3">Home · Brooklyn desk</div>
-            <div className="flex items-baseline gap-[9px]">
+            <div className="flex flex-wrap items-baseline gap-x-[12px] gap-y-[4px]">
               <h1 className="yb-page-title">
                 {greeting}{user?.name ? `, ${user.name}` : ""}
               </h1>
               <span className="text-[12px] text-yb-muted3">{dateLabel} · {timeLabel}</span>
             </div>
           </div>
-          <div className="flex-1" />
           <div className="flex items-center gap-[8px]">
             {can("whatsapp.read") && can("requests.create") && <PrimaryButton className="h-[30px] px-[14px] text-[12px]" onClick={() => void navigate({ to: "/inbox" })}>
               + New Request
@@ -166,7 +165,7 @@ function HomePage() {
           </div>
         </header>
 
-        <section aria-label="Work summary" className="mb-[14px] grid grid-cols-6 gap-[10px]">
+        <section aria-label="Work summary" className="mb-[16px] grid grid-cols-2 gap-[12px] md:grid-cols-3 xl:grid-cols-6">
           {TILES.map((tile) => {
             const selected = activeTile === tile.key;
             return (
@@ -175,26 +174,26 @@ function HomePage() {
                 type="button"
                 aria-pressed={selected}
                 onClick={() => setActiveTile(selected ? null : tile.key)}
-                className={`group min-h-[92px] border bg-white px-[13px] py-[11px] text-left transition-colors ${
+                className={`group min-h-[104px] border bg-white px-[16px] py-[14px] text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yb-green ${
                   selected
                     ? "border-yb-green shadow-[inset_0_-3px_0_#0f4430]"
                     : "border-yb-line hover:border-yb-line-btn hover:bg-yb-row-hover"
                 }`}
               >
                 <div className="flex items-start justify-between">
-                  <span className={`text-[25px] leading-none font-black tabular-nums ${tile.urgent ? "text-yb-red" : "text-yb-green"}`}>
+                  <span className={`text-[26px] leading-none font-semibold tabular-nums ${tile.urgent ? "text-yb-red" : "text-yb-green"}`}>
                     {tile.n}
                   </span>
                   <span className={tile.urgent ? "text-yb-red" : "text-yb-muted3"}>{tileIcons[tile.key]}</span>
                 </div>
-                <div className="mt-[8px] text-[10px] font-bold tracking-[0.85px] text-yb-ink2">{tile.label}</div>
-                <div className="mt-[2px] text-[11px] text-yb-muted3">{tile.sub}</div>
+                <div className="mt-[10px] text-[11px] font-semibold tracking-[0.04em] text-yb-ink2">{tile.label}</div>
+                <div className="mt-[4px] text-[12px] leading-[18px] text-yb-muted3">{tile.sub}</div>
               </button>
             );
           })}
         </section>
 
-        <div className="grid grid-cols-[minmax(0,3fr)_minmax(400px,2fr)] items-start gap-[14px]">
+        <div className="grid grid-cols-1 items-start gap-[16px] min-[1440px]:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
           <div className="min-w-0">
             <DashboardPanel
               title="REQUIRES YOUR ATTENTION"

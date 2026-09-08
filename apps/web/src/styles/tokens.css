@@ -74,6 +74,15 @@ body {
   line-height: 1.3;
 }
 
+/* The home dashboard follows the same typography as the operational screens.
+   Keep wide data tables scrollable inside their panels, not the whole page. */
+.yb-home main table {
+  font-size: 13px;
+  line-height: 1.5;
+}
+.yb-home main th { font-weight: 600; }
+.yb-home main td { padding-top: 12px; padding-bottom: 12px; }
+
 .yb-card { border-radius: var(--radius-yb-panel); }
 .yb-card > :first-child {
   border-top-left-radius: var(--radius-yb-panel);
