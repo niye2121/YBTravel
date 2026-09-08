@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppHeader } from "../components/AppShell/AppHeader";
 import { PrimaryButton, SecondaryButton } from "../components/AppShell/buttons";
@@ -12,9 +12,12 @@ import {
   type GroupParticipantInput,
 } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
-import { getStoredUser } from "../lib/session";
+import { getStoredUser, hasPermission } from "../lib/session";
 
 export const Route = createFileRoute("/whatsapp-groups")({
+  beforeLoad: () => {
+    if (!hasPermission(getStoredUser(), "whatsapp.read")) throw redirect({ to: "/" });
+  },
   component: WhatsAppGroupsPage,
 });
 
@@ -40,8 +43,8 @@ function displayPhone(value: string): string {
 function WhatsAppGroupsPage() {
   const queryClient = useQueryClient();
   const user = getStoredUser();
-  const canCreate =
-    user?.roles.some((role) => role === "travel_agent" || role === "system_administrator") ?? false;
+  const canCreate = hasPermission(user, "whatsapp.create_groups");
+  const canCreateRequest = hasPermission(user, "requests.create");
 
   const accountsQuery = useQuery({
     queryKey: ["messaging", "accounts"],
@@ -63,6 +66,7 @@ function WhatsAppGroupsPage() {
   const requestSettingsQuery = useQuery({
     queryKey: ["request-workflow-settings", "active"],
     queryFn: requestWorkflowSettingsApi.listActive,
+    enabled: canCreate && canCreateRequest,
   });
 
   const [formOpen, setFormOpen] = useState(false);
@@ -159,7 +163,7 @@ function WhatsAppGroupsPage() {
     setTravellerPhones({});
     setStaffPhones({});
     setTripSummary("");
-    setRequestFormOpen(Boolean(value) && !newestRequest);
+    setRequestFormOpen(canCreateRequest && Boolean(value) && !newestRequest);
     setRequestError(null);
     setFormError(null);
   }
@@ -250,23 +254,20 @@ function WhatsAppGroupsPage() {
               : "Ready to create in WhatsApp.";
 
   return (
-    <div className="yb-reference-scale min-h-screen min-w-[1180px] bg-[#eef0ea] text-yb-ink">
+    <div className="min-h-screen min-w-[1180px] bg-yb-canvas text-yb-ink">
       <AppHeader tabs={NAV_TABS} compact />
       <WhatsAppSubnav active="groups" conversationCount={conversations.length} groupCount={groups.length} showSecondaryTabs />
 
-      <div className="flex items-end gap-[14px] px-[22px] pt-[13px] pb-[10px]">
-        <div className="flex h-[30px] w-[30px] items-center justify-center rounded-yb-tile border border-yb-line-btn bg-white">
-          <div className="h-[13px] w-[13px] rounded-[1px] bg-yb-gold" />
-        </div>
+      <div className="flex flex-wrap items-center gap-[20px] px-[24px] pt-[18px] pb-[14px]">
         <div>
-          <div className="text-[10.5px] font-bold tracking-[1.4px] text-yb-muted4">WHATSAPP</div>
+          <div className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-yb-muted4">WHATSAPP</div>
           <div className="flex items-baseline gap-[10px]">
-            <h1 className="mt-[1px] text-[26px] font-black tracking-[-0.2px]">Managed Groups</h1>
-            <span className="text-[12px] text-yb-muted3">{groups.length} groups</span>
+            <h1 className="mt-[1px] yb-page-title">Managed Groups</h1>
+            <span className="text-[12px] text-yb-muted3">{groups.length} {groups.length === 1 ? "group" : "groups"}</span>
           </div>
         </div>
         <div className="flex-1" />
-        <Link to="/inbox" className="text-[12.5px] text-yb-green underline">Back to Inbox</Link>
+        <Link to="/inbox" className="flex h-[36px] items-center rounded-yb border border-yb-line-btn bg-white px-[14px] text-[13px] font-medium text-yb-ink hover:bg-yb-row-hover">Back to Inbox</Link>
         {canCreate && (
           <PrimaryButton onClick={() => setFormOpen((open) => !open)}>
             {formOpen ? "Close Form" : "+ New Group"}
@@ -276,12 +277,12 @@ function WhatsAppGroupsPage() {
 
       {!canCreate && (
         <div className="mx-[22px] border border-yb-line bg-yb-toolbar px-[14px] py-[10px] text-[13px] text-yb-ink2">
-          You can review managed groups. Creating a group currently requires the Travel Agent or System Administrator role.
+          You can review managed groups. Creating one requires the WhatsApp group permission.
         </div>
       )}
 
       {formOpen && canCreate && (
-        <form onSubmit={submitGroup} className="mx-[22px] overflow-hidden rounded-yb border border-yb-line border-t-[3px] border-t-yb-green bg-white">
+        <form onSubmit={submitGroup} className="yb-card mx-[22px] overflow-hidden rounded-yb border border-yb-line border-t-[3px] border-t-yb-green bg-white">
           <div className="flex items-center border-b border-yb-line-soft px-[16px] py-[10px]">
             <div className="text-[14px] font-black">Create a linked WhatsApp group</div>
             <div className="ml-[10px] text-[11.5px] text-yb-muted3">Link the group, add participants, and name it.</div>
@@ -316,10 +317,10 @@ function WhatsAppGroupsPage() {
                       {!clientId
                         ? "Choose a client first."
                         : clientRequests.length === 0
-                          ? "No saved request exists for this client. Create one below."
+                          ? canCreateRequest ? "No saved request exists for this client. Create one below." : "No saved request exists, and you do not have permission to create one."
                           : `${clientRequests.length} saved request${clientRequests.length === 1 ? "" : "s"}; the newest is selected automatically.`}
                     </div>
-                    {clientId && (
+                    {clientId && canCreateRequest && (
                       <button type="button" onClick={() => setRequestFormOpen((open) => !open)} className="mt-[4px] text-[11.5px] text-yb-green underline">
                         {requestFormOpen ? "Cancel new request" : "+ Add a real request record"}
                       </button>
@@ -328,7 +329,7 @@ function WhatsAppGroupsPage() {
                 </div>
               </div>
 
-              {requestFormOpen && (
+              {requestFormOpen && canCreateRequest && (
                 <div className="mt-[12px] border border-yb-line-soft bg-yb-toolbar p-[10px]">
                   <div className="text-[12.5px] font-bold">New request for {selectedClient?.name}</div>
                   <div className="mt-[7px] grid grid-cols-[220px_1fr_auto] items-end gap-[10px]">
@@ -410,7 +411,7 @@ function WhatsAppGroupsPage() {
         </form>
       )}
 
-      <div className="mx-[22px] mt-[14px] mb-[26px] border border-yb-line bg-white">
+      <div className="mx-[24px] mb-[26px] overflow-hidden rounded-yb-panel border border-yb-line bg-white">
         <div className="flex items-center border-b border-yb-line bg-yb-panel-head px-[12px] py-[7px]"><div className="text-[10.5px] font-bold tracking-[1.2px] text-yb-panel-head-text">MANAGED WHATSAPP GROUPS</div><div className="flex-1" /><div className="text-[11px] text-yb-muted3">{groups.length} groups</div></div>
         <table className="w-full table-fixed border-collapse text-[12.5px]">
           <thead><tr className="bg-yb-table-head"><th className="w-[250px] border-b border-yb-line px-[12px] py-[7px] text-left text-[11px] font-bold text-yb-muted">Group</th><th className="w-[170px] border-b border-yb-line px-[12px] py-[7px] text-left text-[11px] font-bold text-yb-muted">Client</th><th className="w-[210px] border-b border-yb-line px-[12px] py-[7px] text-left text-[11px] font-bold text-yb-muted">Request</th><th className="border-b border-yb-line px-[12px] py-[7px] text-left text-[11px] font-bold text-yb-muted">Participants</th><th className="w-[100px] border-b border-yb-line px-[12px] py-[7px] text-left text-[11px] font-bold text-yb-muted">Status</th><th className="w-[150px] border-b border-yb-line px-[12px] py-[7px] text-right text-[11px] font-bold text-yb-muted">Created by</th></tr></thead>

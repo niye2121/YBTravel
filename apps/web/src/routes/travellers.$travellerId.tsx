@@ -1,12 +1,19 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, redirect } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import type { TravellerRelationship } from "@yb-travel/shared";
 import { AppHeader } from "../components/AppShell/AppHeader";
 import { travellersApi } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
+import { getStoredUser, hasPermission } from "../lib/session";
+import { useAuth } from "../lib/AuthContext";
 
-export const Route = createFileRoute("/travellers/$travellerId")({ component: TravellerDetailPage });
+export const Route = createFileRoute("/travellers/$travellerId")({
+  beforeLoad: () => {
+    if (!hasPermission(getStoredUser(), "travellers.read")) throw redirect({ to: "/" });
+  },
+  component: TravellerDetailPage,
+});
 
 type TravellerTab = "identity" | "documents" | "accounts" | "preferences";
 
@@ -72,13 +79,14 @@ function Field({ label, value, wide = false }: { label: string; value: string; w
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return (
-    <div className="mb-[12px] border-b border-[#d7dcd5] pb-[5px] text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">
+    <div className="mb-[12px] border-b border-yb-line pb-[5px] text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">
       {children}
     </div>
   );
 }
 
 function TravellerDetailPage() {
+  const { can } = useAuth();
   const { travellerId: travellerIdParam } = Route.useParams();
   const travellerId = Number(travellerIdParam);
   const [query, setQuery] = useState("");
@@ -108,7 +116,7 @@ function TravellerDetailPage() {
   ];
 
   return (
-    <div className="yb-reference-scale min-h-screen min-w-[1180px] bg-[#eef0ea] font-[Helvetica,Arial,sans-serif] leading-[1.2] text-[#1c1f1b]">
+    <div className="min-h-screen min-w-[1180px] bg-yb-canvas font-sans leading-[1.2] text-yb-ink">
       <AppHeader tabs={NAV_TABS} query={query} onQueryChange={setQuery} compact />
 
       <main className="px-[16px] pt-[14px] pb-[40px]">
@@ -119,12 +127,12 @@ function TravellerDetailPage() {
         </div>
 
         {travellerQuery.isLoading && (
-          <div className="border border-[#c3cbc2] bg-white p-[24px] text-[13px] text-[#6c766f]">Loading traveller…</div>
+          <div className="border border-yb-line bg-white p-[24px] text-[13px] text-[#6c766f]">Loading traveller…</div>
         )}
 
         {!travellerQuery.isLoading && (!Number.isInteger(travellerId) || travellerQuery.isError || !traveller) && (
-          <div className="border border-[#c3cbc2] bg-white p-[24px]">
-            <h1 className="mb-[6px] text-[22px] font-bold">Traveller not found</h1>
+          <div className="border border-yb-line bg-white p-[24px]">
+            <h1 className="mb-[6px] yb-page-title">Traveller not found</h1>
             <p className="mb-[14px] text-[13px] text-[#6c766f]">This traveller may no longer exist or may be hidden by the current demo-data setting.</p>
             <Link to="/travellers" search={{}} className="text-[13px] font-bold text-[#0b5c3b] underline">Return to Travellers</Link>
           </div>
@@ -137,24 +145,24 @@ function TravellerDetailPage() {
               <div>
                 <div className="text-[10px] uppercase tracking-[0.14em] text-[#6c766f]">Traveller</div>
                 <div className="flex items-baseline gap-[8px]">
-                  <h1 className="text-[24px] font-bold tracking-[-0.01em]">{traveller.name}</h1>
+                  <h1 className="yb-page-title">{traveller.name}</h1>
                   {age !== null && <span className="text-[12px] text-[#6c766f]">Age {age}</span>}
                   {traveller.isDemo && <span className="border border-[#d3b35a] bg-[#fff7d8] px-[6px] py-[2px] text-[9px] font-bold text-[#7b5b00]">DEMO · READ ONLY</span>}
                 </div>
               </div>
               <div className="flex-1" />
-              <Link to="/travellers" search={{}} className="border border-[#8d968e] bg-white px-[14px] py-[6px] text-[12px]">Back to Travellers</Link>
+              <Link to="/travellers" search={{}} className="border border-yb-line-btn bg-white px-[14px] py-[6px] text-[12px]">Back to Travellers</Link>
             </header>
 
-            <section className="border border-[#c3cbc2] border-t-[3px] border-t-[#0d5c39] bg-white">
-              <div className="flex items-center gap-[10px] border-b border-[#d7dcd5] px-[16px] py-[10px]">
+            <section className="yb-card border border-yb-line border-t-[3px] border-t-[#0d5c39] bg-white">
+              <div className="flex items-center gap-[10px] border-b border-yb-line px-[16px] py-[10px]">
                 <div className="text-[14px] font-bold">Traveller profile</div>
                 <div className="text-[11px] text-[#6c766f]">Existing details are shown in read-only form view.</div>
               </div>
 
               <div className="grid grid-cols-[minmax(0,1fr)_300px]">
                 <div className="min-w-0 px-[20px] pt-[14px] pb-[18px]">
-                  <div className="mb-[16px] flex border-b border-[#d7dcd5]">
+                  <div className="mb-[16px] flex border-b border-yb-line">
                     {tabs.map((tab) => (
                       <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-[6px] border-b-2 px-[14px] py-[7px] text-[12px] ${activeTab === tab.id ? "border-[#0d5c39] font-bold text-[#0d5c39]" : "border-transparent text-[#0b5c3b]"}`}>
                         {tab.label}
@@ -194,10 +202,10 @@ function TravellerDetailPage() {
                     <div>
                       <SectionTitle>Linked client accounts</SectionTitle>
                       <div className="border border-[#ccd3cb]">
-                        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] border-b border-[#dfe4dc] bg-[#f2f5f0] px-[10px] py-[6px] text-[10px] font-bold tracking-[0.1em] text-[#5c665e]"><div>CLIENT</div><div>RELATIONSHIP</div></div>
+                        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] border-b border-[#dfe4dc] bg-yb-panel-head px-[10px] py-[6px] text-[10px] font-bold tracking-[0.1em] text-[#5c665e]"><div>CLIENT</div><div>RELATIONSHIP</div></div>
                         {traveller.clients.map((client) => (
-                          <div key={client.clientId} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] border-b border-[#edf0ea] px-[10px] py-[9px] text-[12.5px] last:border-b-0">
-                            <Link to="/clients/$clientId" params={{ clientId: String(client.clientId) }} className="font-bold text-[#0b5c3b] underline">{client.clientName}</Link>
+                          <div key={client.clientId} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] border-b border-yb-line-row px-[10px] py-[9px] text-[12.5px] last:border-b-0">
+                            {can("clients.read") ? <Link to="/clients/$clientId" params={{ clientId: String(client.clientId) }} className="font-bold text-[#0b5c3b] underline">{client.clientName}</Link> : <div className="font-bold">{client.clientName}</div>}
                             <div>{client.relationship ? RELATIONSHIP_LABELS[client.relationship as TravellerRelationship] ?? client.relationship : "Not specified"}</div>
                           </div>
                         ))}
@@ -214,14 +222,14 @@ function TravellerDetailPage() {
                   )}
                 </div>
 
-                <aside className="border-l border-[#d7dcd5] bg-[#f9faf8] px-[16px] py-[14px]">
+                <aside className="border-l border-yb-line bg-yb-panel-head px-[16px] py-[14px]">
                   <div className="mb-[8px] text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Profile completeness</div>
-                  <div className="mb-[6px] h-[6px] bg-[#e4e8e2]"><div className="h-[6px] bg-[#0d5c39]" style={{ width: `${completeness}%` }} /></div>
+                  <div className="mb-[6px] h-[6px] bg-[#e4e8e2]"><div className="h-[6px] bg-yb-green" style={{ width: `${completeness}%` }} /></div>
                   <div className="mb-[10px] text-[11.5px] text-[#59635b]">{completeness}% complete across the stored profile sections.</div>
                   {([["Identity", identityReady], ["Passport", passportReady], ["Client account", linked]] as Array<[string, boolean]>).map(([label, ready]) => (
                     <div key={label} className={`mb-[6px] flex gap-[7px] text-[11.5px] ${ready ? "text-[#0d5c39]" : "text-[#9aa39b]"}`}><span className="font-bold">{ready ? "✓" : "○"}</span><span>{label}</span></div>
                   ))}
-                  <div className="my-[14px] border-t border-[#e4e8e2]" />
+                  <div className="my-[14px] border-t border-yb-line-row" />
                   <div className="mb-[7px] text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Record details</div>
                   <div className="mb-[5px] text-[11.5px] text-[#59635b]">Created {new Date(traveller.createdAt).toLocaleDateString("en-US")}</div>
                   <div className="text-[11.5px] text-[#59635b]">{traveller.clients.length} linked client account{traveller.clients.length === 1 ? "" : "s"}</div>

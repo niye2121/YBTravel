@@ -136,6 +136,17 @@ export type MessageRecord = {
 };
 
 export type DraftIntakeStatus = "pending" | "rejected" | "approved" | "failed";
+export type BookingResolution = "matched" | "new_booking" | "ambiguous";
+export type OpenBookingCandidate = {
+  id: number;
+  requestNumber: string;
+  summary: string;
+  origin: string | null;
+  destination: string | null;
+  departureDateText: string | null;
+  returnDateText: string | null;
+  statusName: string;
+};
 export type DraftIntakeRecord = {
   id: number;
   conversationId: number;
@@ -156,6 +167,16 @@ export type DraftIntakeRecord = {
   missingInformation: string[];
   suggestedReply: string | null;
   confidence: number | null;
+  bookingResolution: BookingResolution | null;
+  matchedTravelRequestId: number | null;
+  bookingMatchConfidence: number | null;
+  bookingMatchReason: string | null;
+  resolvedDepartureDate: string | null;
+  departureDatePrecision: "day" | "month" | null;
+  resolvedReturnDate: string | null;
+  returnDatePrecision: "day" | "month" | null;
+  dateInferenceNote: string | null;
+  openBookings: OpenBookingCandidate[];
   analysisError: string | null;
   travelRequestId: number | null;
   travelRequestNumber: string | null;
@@ -175,6 +196,8 @@ export type UpdateDraftIntakeInput = {
   returnDateText: string | null;
   missingInformation: string[];
   suggestedReply: string | null;
+  bookingResolution: BookingResolution;
+  matchedTravelRequestId: number | null;
 };
 
 export type TravelRequestRecord = {
@@ -354,10 +377,10 @@ export type AssignableStaffRecord = {
 
 export type StaffNotificationRecord = {
   id: number;
-  type: "request_assigned";
+  type: "request_assigned" | "reminder_due" | "reminder_overdue" | "reminder_escalated" | "whatsapp_message";
   title: string;
   message: string;
-  entityType: "travel_request";
+  entityType: "travel_request" | "client" | "onboarding_task" | "reminder" | "conversation";
   entityId: string;
   createdByName: string | null;
   readAt: string | null;
@@ -365,8 +388,128 @@ export type StaffNotificationRecord = {
 };
 
 export type StaffNotificationsResponse = {
+  inboxUnreadCount: number;
+  inboxUnreadByConversation: Record<string, number>;
   unreadCount: number;
   notifications: StaffNotificationRecord[];
+};
+
+export type ReminderState = "pending" | "due" | "overdue" | "escalated" | "acknowledged" | "resolved";
+export type ReminderRecord = {
+  id: string;
+  type: "unanswered_inquiry" | "missing_information" | "next_action" | "onboarding_task";
+  title: string;
+  message: string;
+  entityType: "travel_request" | "client" | "onboarding_task";
+  entityId: string;
+  requestId: number | null;
+  requestNumber: string | null;
+  clientId: number | null;
+  clientName: string | null;
+  onboardingTaskId: string | null;
+  assignedUserId: number;
+  assignedUserName: string;
+  state: ReminderState;
+  dueAt: string;
+  escalatesAt: string;
+  acknowledgedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ReminderQueueResponse = {
+  counts: Record<ReminderState | "active", number>;
+  reminders: ReminderRecord[];
+};
+
+export type SupervisorWorkload = {
+  userId: number;
+  agentName: string;
+  roles: string[];
+  availabilityStatus: string;
+  capacityLimit: number;
+  openRequests: number;
+  openBookings: number;
+  dueToday: number;
+  overdue: number;
+  escalated: number;
+  openCases: number;
+  oldestUntouchedAt: string | null;
+  oldestUntouchedLabel: string;
+};
+
+export type SupervisorReviewType = "pricing_override" | "markup_change" | "waiver" | "assignment_override" | "operational_exception";
+export type SupervisorReviewOutcome = "approved" | "rejected" | "noted" | "coaching_required";
+export type SupervisorReviewItem = {
+  id: string;
+  requestId: number | null;
+  requestNumber: string | null;
+  clientName: string | null;
+  type: SupervisorReviewType;
+  summary: string;
+  overriddenRule: string;
+  reason: string;
+  valueAmount: string | null;
+  currency: string | null;
+  occurredById: number;
+  occurredByName: string;
+  occurredAt: string;
+  occurredAtLabel: string;
+  status: "unreviewed" | "reviewed";
+  reviewedByName: string | null;
+  reviewedAt: string | null;
+  reviewedAtLabel: string | null;
+  outcome: SupervisorReviewOutcome | null;
+  reviewComment: string | null;
+};
+
+export type SupervisorReviewQueue = {
+  counts: { unreviewed: number; reviewed: number; all: number };
+  items: SupervisorReviewItem[];
+};
+
+export type SupervisorReviewSettings = {
+  markupAmountThreshold: string;
+  markupPercentageThreshold: string;
+  currency: string;
+  updatedAt: string;
+};
+
+export type AuditChange = { field: string; before: string; after: string };
+export type AuditHistoryItem = {
+  id: string;
+  eventKind: "change" | "access";
+  actorUserId: number | null;
+  actorName: string;
+  actorEmail: string | null;
+  action: string;
+  entityType: string;
+  entityId: string;
+  occurredAt: string;
+  occurredAtLabel: string;
+  changes: AuditChange[];
+  importance: "important" | "standard";
+  reason: string | null;
+};
+export type AuditHistoryResponse = {
+  clients: Array<{ id: number; name: string }>;
+  items: AuditHistoryItem[];
+  actors: Array<{ id: number; name: string; email: string | null }>;
+  actions: string[];
+  page: number;
+  pageSize: number;
+  total: number;
+  pageCount: number;
+};
+export type AuditHistoryFilters = {
+  clientId: string;
+  q: string;
+  actorUserId: string;
+  action: string;
+  dateFrom: string;
+  dateTo: string;
+  importantOnly: boolean;
+  page: number;
 };
 
 export type ClientTraveller = {
@@ -698,7 +841,11 @@ function recordApi(scope: "clients" | "requests") {
 }
 export const clientRecordsApi = recordApi("clients");
 export const requestRecordsApi = recordApi("requests");
-export const recordDocumentsApi = { download: (id: string) => requestBlob(`/record-documents/${id}/download`) };
+export const recordDocumentsApi = {
+  download: (id: string) => requestBlob(`/record-documents/${id}/download`),
+  preview: (id: string) => requestBlob(`/record-documents/${id}/preview`),
+  delete: (id: string) => request<{ deleted: boolean; id: string }>(`/record-documents/${id}`, { method: "DELETE" }),
+};
 
 export const workflowSettingsApi = {
   listActive: () => request<WorkflowSettings>("/workflow-settings"),
@@ -843,11 +990,58 @@ export const requestsApi = {
 };
 
 export const notificationsApi = {
+  readConversation: (conversationId: number, throughMessageId: number) =>
+    request<{ updatedCount: number }>(`/notifications/conversations/${conversationId}/read/${throughMessageId}`, { method: "POST" }),
   list: () => request<StaffNotificationsResponse>("/notifications"),
   markRead: (id: number) =>
     request<StaffNotificationRecord>(`/notifications/${id}/read`, { method: "POST" }),
   markAllRead: () =>
     request<{ updatedCount: number }>("/notifications/read-all", { method: "POST" }),
+};
+
+export const remindersApi = {
+  list: (state: ReminderState | "active" | "all", scope: "mine" | "all") =>
+    request<ReminderQueueResponse>(`/reminders?state=${state}&scope=${scope}`),
+  acknowledge: (id: string) =>
+    request<ReminderRecord>(`/reminders/${id}/acknowledge`, { method: "POST" }),
+  reassign: (id: string, assignedUserId: number) =>
+    request<ReminderRecord>(`/reminders/${id}/assignment`, {
+      method: "PATCH",
+      body: JSON.stringify({ assignedUserId }),
+    }),
+};
+
+export const supervisorApi = {
+  workload: (showAll = false) => request<SupervisorWorkload[]>(`/supervisor/workload?showAll=${showAll}`),
+  reviews: (status: "unreviewed" | "reviewed" | "all") =>
+    request<SupervisorReviewQueue>(`/supervisor/reviews?status=${status}`),
+  recordReview: (input: {
+    requestId: number | null; type: SupervisorReviewType; summary: string;
+    overriddenRule: string; reason: string; valueAmount: string | null; currency: string | null;
+  }) => request<SupervisorReviewItem>("/supervisor/reviews", { method: "POST", body: JSON.stringify(input) }),
+  completeReview: (id: string, outcome: SupervisorReviewOutcome, comment: string) =>
+    request<SupervisorReviewItem>(`/supervisor/reviews/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ outcome, comment }),
+    }),
+  settings: () => request<SupervisorReviewSettings>("/supervisor/settings"),
+  updateSettings: (input: Omit<SupervisorReviewSettings, "updatedAt">) =>
+    request<SupervisorReviewSettings>("/supervisor/settings", { method: "PATCH", body: JSON.stringify(input) }),
+};
+
+export const auditHistoryApi = {
+  list: (filters: AuditHistoryFilters) => {
+    const params = new URLSearchParams();
+    if (filters.q) params.set("q", filters.q);
+    if (filters.actorUserId) params.set("actorUserId", filters.actorUserId);
+    if (filters.clientId) params.set("clientId", filters.clientId);
+    if (filters.action) params.set("action", filters.action);
+    if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+    if (filters.dateTo) params.set("dateTo", filters.dateTo);
+    params.set("importantOnly", String(filters.importantOnly));
+    params.set("page", String(filters.page));
+    return request<AuditHistoryResponse>(`/audit-history?${params.toString()}`);
+  },
 };
 
 export const assignmentSettingsApi = {
@@ -895,6 +1089,8 @@ export const messagingApi = {
     request<DraftIntakeRecord>(`/messaging/draft-intakes/${id}/reject`, { method: "POST" }),
   createRequestFromDraft: (id: number) =>
     request<DraftIntakeRecord>(`/messaging/draft-intakes/${id}/create-request`, { method: "POST" }),
+  applyDraftToBooking: (id: number) =>
+    request<DraftIntakeRecord>(`/messaging/draft-intakes/${id}/apply-to-booking`, { method: "POST" }),
   sendMessage: (conversationId: number, text: string, travelRequestId?: number) =>
     request<{ ok: boolean }>(`/messaging/conversations/${conversationId}/messages`, {
       method: "POST",

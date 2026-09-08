@@ -64,21 +64,21 @@ export type Departure = {
 };
 
 export const DEPARTURES: Departure[] = [
-  { client: "Weinstock", pax: 3, trip: "JFK → TLV", flight: "DL 468", local: "08 Aug 19:55",
+  { client: "Weinstock", pax: 3, trip: "JFK → TLV", flight: "DL 468", local: "08 Sep 19:55",
     state: "Not confirmed — 6h escalation", level: "urgent" },
-  { client: "Bernstein", pax: 4, trip: "EWR → TLV", flight: "UA 090", local: "08 Aug 22:10",
+  { client: "Bernstein", pax: 4, trip: "EWR → TLV", flight: "UA 090", local: "08 Sep 22:10",
     state: "Not confirmed — 12h follow-up sent", level: "warn" },
-  { client: "Schwartz", pax: 2, trip: "JFK → TLV", flight: "LY 002", local: "18 Aug 00:40",
-    state: "Check-in opens in 6h", level: "normal" },
-  { client: "Friedman", pax: 1, trip: "TLV → JFK", flight: "LY 007", local: "28 Aug 01:15",
-    state: "Checked in", level: "done" },
+  { client: "Schwartz", pax: 2, trip: "JFK → TLV", flight: "LY 002", local: "09 Sep 00:40",
+    state: "Check-in opens today", level: "normal" },
+  { client: "Friedman", pax: 1, trip: "TLV → JFK", flight: "LY 007", local: "12 Sep 01:15",
+    state: "Documents confirmed", level: "done" },
 ];
 
 export type Alert = { level: "urgent" | "warn" | "info"; text: string };
 
 export const ALERTS: Alert[] = [
   { level: "urgent", text: "Sabre queue 42 — 3 items require attention" },
-  { level: "urgent", text: "Schedule change on LY 002, 18 Aug — affects 2 ticketed trips" },
+  { level: "urgent", text: "Schedule change on LY 002, 9 Sep — affects 2 ticketed trips" },
   { level: "warn", text: "1 request unassigned for more than 4 hours" },
   { level: "info", text: "Booking-fee table effective 1 Sep is still in draft" },
 ];

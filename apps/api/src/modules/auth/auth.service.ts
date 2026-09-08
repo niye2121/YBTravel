@@ -6,6 +6,7 @@ import type { Pool, PoolClient } from "pg";
 import type { StaffRole, User } from "@yb-travel/shared";
 import { PG_POOL } from "../../database/database.module";
 import { loadEnv } from "../../config/env";
+import { backendEffectivePermissions, isImplementedPermission } from "./permissions";
 
 type UserRow = {
   id: number;
@@ -19,12 +20,20 @@ type UserRow = {
 
 const dummyPasswordHash = bcrypt.hash("yb-travel-invalid-login-sentinel", 12);
 
-function toSafeUser(row: UserRow): User {
+type PermissionOverrideRow = { permission_code: string; granted: boolean };
+
+function toSafeUser(row: UserRow, overrides: PermissionOverrideRow[]): User {
+  const validOverrides = overrides.flatMap((override) => {
+    return isImplementedPermission(override.permission_code)
+      ? [{ permission: override.permission_code, granted: override.granted }]
+      : [];
+  });
   return {
     id: row.id,
     name: row.name,
     email: row.email,
     roles: row.roles as StaffRole[],
+    permissions: backendEffectivePermissions(row.roles as StaffRole[], validOverrides),
     createdAt: row.created_at,
   };
 }
@@ -39,6 +48,18 @@ function toSafeUser(row: UserRow): User {
 @Injectable()
 export class AuthService {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
+
+  /**
+   * Reads the explicit permission differences for one employee from the same
+   * database connection as the surrounding authentication operation.
+   */
+  private async getPermissionOverrides(db: Pool | PoolClient, userId: number): Promise<PermissionOverrideRow[]> {
+    const result = await db.query<PermissionOverrideRow>(
+      "SELECT permission_code, granted FROM user_permission_overrides WHERE user_id = $1",
+      [userId],
+    );
+    return result.rows;
+  }
 
   private loginKey(email: string, ipAddress: string): string {
     return createHmac("sha256", loadEnv().JWT_SECRET)
@@ -100,7 +121,7 @@ export class AuthService {
       await client.query("DELETE FROM auth_login_attempts WHERE key_hash = $1", [keyHash]);
       await client.query("DELETE FROM auth_login_attempts WHERE last_attempt_at < now() - interval '24 hours'");
       await client.query("COMMIT");
-      return toSafeUser(row);
+      return toSafeUser(row, await this.getPermissionOverrides(client, row.id));
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -138,6 +159,6 @@ export class AuthService {
 
     const result = await this.pool.query<UserRow>("SELECT * FROM users WHERE id = $1 AND active = true", [id]);
     const row = result.rows[0];
-    return row ? toSafeUser(row) : null;
+    return row ? toSafeUser(row, await this.getPermissionOverrides(this.pool, row.id)) : null;
   }
 }

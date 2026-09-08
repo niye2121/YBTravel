@@ -13,8 +13,8 @@ import {
 import { z, ZodError } from "zod";
 import type { Client } from "@yb-travel/shared";
 import { AuthGuard, type AuthenticatedRequest } from "../auth/auth.guard";
-import { AllowedRoles } from "../auth/allowed-roles.decorator";
-import { RoleGuard } from "../auth/role.guard";
+import { AllowedPermissions } from "../auth/allowed-permissions.decorator";
+import { PermissionGuard } from "../auth/permission.guard";
 import { ClientsService, type ClientTravellerRow } from "./clients.service";
 import { OnboardingService } from "./onboarding.service";
 
@@ -56,13 +56,12 @@ const reviewInformationSchema = z.object({
 });
 
 /**
- * Client creation and editing belongs to Offshore Intake Employees and
- * Travel Agents (P1-13/14), not just admins — AuthGuard only, no
- * AdminGuard. Fine-grained per-role permission checks (P1-19) aren't built
- * yet, same scope boundary as the Users feature: anyone logged in can act.
+ * Client and onboarding endpoints use action-specific permissions after
+ * AuthGuard. Roles supply defaults, while database overrides can grant or
+ * revoke each action for an individual employee.
  */
 @Controller("clients")
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, PermissionGuard)
 export class ClientsController {
   constructor(
     private readonly clientsService: ClientsService,
@@ -70,16 +69,19 @@ export class ClientsController {
   ) {}
 
   @Get()
+  @AllowedPermissions("clients.read")
   list(): Promise<Client[]> {
     return this.clientsService.list();
   }
 
   @Get("reps")
+  @AllowedPermissions("clients.read")
   listReps(): Promise<{ id: number; name: string }[]> {
     return this.clientsService.listReps();
   }
 
   @Post()
+  @AllowedPermissions("clients.create")
   create(@Req() request: AuthenticatedRequest, @Body() body: unknown): Promise<Client> {
     try {
       return this.clientsService.create(createClientSchema.parse(body), request.user.id);
@@ -90,8 +92,7 @@ export class ClientsController {
   }
 
   @Patch(":id")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  @AllowedPermissions("clients.update")
   update(
     @Param("id", ParseIntPipe) id: number,
     @Req() request: AuthenticatedRequest,
@@ -106,13 +107,13 @@ export class ClientsController {
   }
 
   @Get(":id/onboarding-status")
+  @AllowedPermissions("onboarding.read")
   getOnboardingStatus(@Param("id", ParseIntPipe) id: number) {
     return this.onboarding.getClientStatus(id);
   }
 
   @Post(":id/information/review")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  @AllowedPermissions("onboarding.manage")
   reviewInformation(
     @Param("id", ParseIntPipe) id: number,
     @Req() request: AuthenticatedRequest,
@@ -130,8 +131,7 @@ export class ClientsController {
   }
 
   @Post(":id/onboarding-tasks/:taskId/complete")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  @AllowedPermissions("onboarding.manage")
   completeOnboardingTask(
     @Param("id", ParseIntPipe) id: number,
     @Param("taskId", ParseIntPipe) taskId: number,
@@ -141,11 +141,13 @@ export class ClientsController {
   }
 
   @Get(":id/travellers")
+  @AllowedPermissions("travellers.read")
   listTravellers(@Param("id", ParseIntPipe) id: number): Promise<ClientTravellerRow[]> {
     return this.clientsService.listTravellers(id);
   }
 
   @Post(":id/travellers")
+  @AllowedPermissions("travellers.link")
   async linkTraveller(
     @Param("id", ParseIntPipe) id: number,
     @Body() body: unknown,

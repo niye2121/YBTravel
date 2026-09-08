@@ -10,11 +10,11 @@ import {
   type CalculationBasis,
 } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
-import { getStoredUser, hasAdminRole } from "../lib/session";
+import { getStoredUser, hasPermission } from "../lib/session";
 
 export const Route = createFileRoute("/booking-fees")({
   beforeLoad: () => {
-    if (!hasAdminRole(getStoredUser())) throw redirect({ to: "/" });
+    if (!hasPermission(getStoredUser(), "settings.manage")) throw redirect({ to: "/" });
   },
   component: BookingFeesPage,
 });
@@ -143,7 +143,7 @@ function BookingFeesPage() {
   const feeGroups = feeGroupsQuery.data ?? [];
 
   return (
-    <div className="min-w-[1280px] bg-white text-yb-ink">
+    <div className="min-h-screen min-w-[1280px] bg-yb-canvas text-yb-ink">
       <AppHeader tabs={NAV_TABS} />
 
       <div className="flex items-center gap-[14px] px-[22px] pt-[16px] pb-[14px]">
@@ -152,7 +152,7 @@ function BookingFeesPage() {
         </div>
         <div>
           <div className="text-[10.5px] font-bold tracking-[1.4px] text-yb-muted4">SETUP</div>
-          <h1 className="mt-[1px] text-[26px] font-black tracking-[-0.2px]">Booking Fees</h1>
+          <h1 className="mt-[1px] yb-page-title">Booking Fees</h1>
           <p className="mt-[3px] text-[13px] text-yb-muted3">
             Configure fee groups and how each fee is calculated. Changes apply to future calculations.
           </p>

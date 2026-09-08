@@ -1,16 +1,17 @@
-@import url("https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 
 /*
- * YB Travel design tokens — extracted from design/requests-queue.approved.html,
- * documented in docs/02-design-system.md. Do not fall back to Tailwind's
+ * YB Travel design tokens — unified with the approved Inbox, September 2026.
+ * Do not fall back to Tailwind's
  * default gray-* scale anywhere in this app; these greys are warm, not cool.
  */
 @theme {
-  --font-sans: "Lato", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: "Instrument Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
   /* Brand and chrome */
-  --color-yb-green: #0f4430;
+  --color-yb-green: #0d2f24;
   --color-yb-green-light: #12503a;
   --color-yb-green-dark: #0d3f2c;
   --color-yb-green-darker: #0a3324;
@@ -22,8 +23,8 @@
   --color-yb-gold-count: #a8761b;
 
   /* Text */
-  --color-yb-ink: #22221f;
-  --color-yb-ink2: #33332e;
+  --color-yb-ink: #1b1e1c;
+  --color-yb-ink2: #3d423c;
   --color-yb-muted: #4b4b44;
   --color-yb-muted2: #5c5c54;
   --color-yb-muted3: #6f6f66;
@@ -34,69 +35,150 @@
   --color-yb-nav-more: #dfeae4;
 
   /* Surfaces and lines */
-  --color-yb-panel-head: #e9eae1;
+  --color-yb-panel-head: #faf9f6;
+  --color-yb-canvas: #f6f5f1;
   --color-yb-panel-head-text: #3f4a42;
   --color-yb-toolbar: #fbfbf7;
-  --color-yb-table-head: #f4f4ed;
-  --color-yb-row-hover: #f6f8f3;
+  --color-yb-table-head: #faf9f6;
+  --color-yb-row-hover: #f0f4ef;
   --color-yb-hover-btn: #f2f2ec;
-  --color-yb-line: #cfcfc4;
-  --color-yb-line-btn: #b6b6ac;
-  --color-yb-line-row: #e6e6dc;
-  --color-yb-line-soft: #ddddd3;
+  --color-yb-line: #e6e3da;
+  --color-yb-line-btn: #ddd9cf;
+  --color-yb-line-row: #eeece5;
+  --color-yb-line-soft: #eeece5;
   --color-yb-line-soft2: #dcdcd2;
-  --color-yb-line-head: #d6d6cd;
+  --color-yb-line-head: #e6e3da;
 
   /* Status */
   --color-yb-red: #b3261e;
   --color-yb-red-group: #9c2b1c;
   --color-yb-amber: #8a6410;
 
-  /* Geometry — 2px radius everywhere except the logo tile (3px) and the
-     active nav tab (3px 3px 0 0, applied directly where used). */
-  --radius-yb: 2px;
-  --radius-yb-tile: 3px;
+  /* Inbox geometry: controls 9px, panels 14px, logo and nav tiles 8px. */
+  --radius-yb: 9px;
+  --radius-yb-panel: 14px;
+  --radius-yb-tile: 8px;
 }
 
 body {
-  background: #f7f7f2;
+  background: var(--color-yb-canvas);
   font-family: var(--font-sans);
   color: var(--color-yb-ink);
+  -webkit-font-smoothing: antialiased;
 }
 
-/* The supplied desktop reference is authored at 100% browser zoom. Chrome
-   reports a 0.75 dppx viewport when the operator uses the saved 75% zoom;
-   compensate only in that exact condition so the interface preserves the
-   reference's physical density without changing normal 100% rendering. */
-@media (resolution: 0.75dppx) {
-  .yb-reference-scale {
-    width: 100%;
-    min-height: 75vh;
-    zoom: 1.3333333333;
+.yb-page-title {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+
+.yb-card { border-radius: var(--radius-yb-panel); }
+.yb-card > :first-child {
+  border-top-left-radius: var(--radius-yb-panel);
+  border-top-right-radius: var(--radius-yb-panel);
+}
+.yb-card > :last-child {
+  border-bottom-left-radius: var(--radius-yb-panel);
+  border-bottom-right-radius: var(--radius-yb-panel);
+}
+button.bg-yb-green { border-radius: var(--radius-yb); }
+
+/* Bordered form controls share the Inbox's shape without changing icon buttons,
+   checkboxes, tabs, or any control's interaction. */
+:where(button, input:not([type="checkbox"]):not([type="radio"]), select, textarea).border {
+  border-radius: var(--radius-yb);
+}
+
+.yb-inbox-redesign {
+  font-family: "Instrument Sans", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.yb-app-header { font-family: "Instrument Sans", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+.yb-header-primary, .yb-header-search, .yb-header-name, .yb-header-desk { display: none; }
+@media (min-width: 1024px) {
+  .yb-header-primary { display: flex; }
+  .yb-header-overflow-primary { display: none; }
+}
+@media (min-width: 1280px) {
+  .yb-header-name, .yb-header-desk { display: block; }
+}
+@media (min-width: 1500px) { .yb-header-search { display: flex; } }
+
+.yb-inbox-redesign .font-mono {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+.yb-inbox-list,
+.yb-inbox-details,
+.yb-inbox-primary-nav,
+.yb-inbox-global-search,
+.yb-inbox-xl-label,
+.yb-inbox-secondary-tab {
+  display: none;
+}
+
+.yb-inbox-nav-more {
+  display: block;
+}
+
+@media (min-width: 640px) {
+  .yb-inbox-secondary-tab {
+    display: block;
   }
 }
+
+@media (min-width: 768px) {
+  .yb-inbox-list {
+    display: flex;
+  }
+}
+
+@media (min-width: 1280px) {
+  .yb-inbox-details,
+  .yb-inbox-xl-label {
+    display: block;
+  }
+}
+
+@media (min-width: 1024px) {
+  .yb-inbox-primary-nav,
+  .yb-inbox-global-search {
+    display: flex;
+  }
+}
+
+@media (min-width: 1500px) {
+  .yb-inbox-nav-more {
+    display: none;
+  }
+}
+
+/* Respect browser zoom on every route; never scale individual pages. */
 
 /* Traveller reference screen: keep the supplied mockup's soft structural
    borders even when Tailwind's generic border utility resolves to currentColor. */
 .yb-traveller-card {
-  border-color: #c3cbc2;
-  border-top-color: #0d5c39;
+  border-color: var(--color-yb-line);
+  border-top-color: var(--color-yb-green);
 }
 
 .yb-traveller-card-header,
 .yb-traveller-section-title {
-  border-bottom-color: #e4e8e2;
+  border-bottom-color: var(--color-yb-line-row);
 }
 
 .yb-traveller-tabs,
 .yb-traveller-card-footer {
-  border-color: #d7dcd5;
+  border-color: var(--color-yb-line);
 }
 
 .yb-traveller-aside {
-  border-left-color: #e4e8e2;
+  border-left-color: var(--color-yb-line-row);
 }
 
 .yb-traveller-table {
-  border-color: #c3cbc2;
+  border-color: var(--color-yb-line);
 }

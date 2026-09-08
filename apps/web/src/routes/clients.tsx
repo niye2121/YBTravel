@@ -1,4 +1,4 @@
-import { Link, Outlet, createFileRoute, useParams } from "@tanstack/react-router";
+import { Link, Outlet, createFileRoute, redirect, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { z } from "zod";
@@ -10,8 +10,12 @@ import { ImplementationStatusIcon } from "../components/ImplementationStatusIcon
 import { useAuth } from "../lib/AuthContext";
 import { bookingFeesApi, clientsApi } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
+import { getStoredUser, hasPermission } from "../lib/session";
 
 export const Route = createFileRoute("/clients")({
+  beforeLoad: () => {
+    if (!hasPermission(getStoredUser(), "clients.read")) throw redirect({ to: "/" });
+  },
   validateSearch: z.object({
     newClient: z.boolean().optional(),
     name: z.coerce.string().optional(),
@@ -50,17 +54,18 @@ function ClientsPage() {
   const params = useParams({ strict: false }) as { clientId?: string };
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
-  const { user } = useAuth();
+  const { user, can } = useAuth();
+  const canCreateClient = can("clients.create") && can("fees.read");
   const queryClient = useQueryClient();
   const clientsQuery = useQuery({ queryKey: ["clients"], queryFn: clientsApi.list });
   const repsQuery = useQuery({ queryKey: ["clients", "reps"], queryFn: clientsApi.listReps });
-  const feeGroupsQuery = useQuery({ queryKey: ["booking-fees", "active"], queryFn: bookingFeesApi.listActive });
+  const feeGroupsQuery = useQuery({ queryKey: ["booking-fees", "active"], queryFn: bookingFeesApi.listActive, enabled: canCreateClient });
 
   const [filter, setFilter] = useState("All Clients");
   const [query, setQuery] = useState("");
   const [hoverRow, setHoverRow] = useState<number | null>(null);
 
-  const [showForm, setShowForm] = useState(search.newClient === true);
+  const [showForm, setShowForm] = useState(search.newClient === true && canCreateClient);
   const [name, setName] = useState(search.name ?? "");
   const [phoneNumber, setPhoneNumber] = useState(search.whatsappNumber ?? "");
   const [preferredRepId, setPreferredRepId] = useState("");
@@ -71,11 +76,11 @@ function ClientsPage() {
   const closeAfterCreateRef = useRef(true);
 
   useEffect(() => {
-    if (!search.newClient) return;
+    if (!search.newClient || !canCreateClient) return;
     setShowForm(true);
     setName(search.name ?? "");
     setPhoneNumber(search.whatsappNumber ?? "");
-  }, [search.name, search.newClient, search.whatsappNumber]);
+  }, [canCreateClient, search.name, search.newClient, search.whatsappNumber]);
 
   useEffect(() => {
     if (!showForm || bookingFeeGroupId || !feeGroupsQuery.data?.length) return;
@@ -191,7 +196,7 @@ function ClientsPage() {
   if (params.clientId) return <Outlet />;
 
   return (
-    <div className="yb-reference-scale min-h-screen min-w-[1180px] bg-[#eef0ea] text-yb-ink">
+    <div className="min-h-screen min-w-[1180px] bg-yb-canvas text-yb-ink">
       <AppHeader tabs={NAV_TABS} query={query} onQueryChange={setQuery} compact />
 
       <FilterStrip filters={filters} active={filter} onChange={setFilter} compact />
@@ -204,21 +209,21 @@ function ClientsPage() {
         <div>
           <div className="text-[10px] uppercase tracking-[1.4px] text-yb-muted3">CLIENTS</div>
           <div className="flex items-baseline gap-[8px]">
-            <h1 className="text-[24px] font-black tracking-[-0.2px]">{filter}</h1>
+            <h1 className="yb-page-title">{filter}</h1>
             <span className="text-[12px] text-yb-muted3">{allClients.length} total</span>
           </div>
         </div>
         <div className="flex-1" />
         <div className="flex items-center gap-[10px]">
-          {!showForm && <PrimaryButton onClick={() => setShowForm(true)}>+ New Client</PrimaryButton>}
+          {canCreateClient && !showForm && <PrimaryButton onClick={() => setShowForm(true)}>+ New Client</PrimaryButton>}
           <SecondaryButton className="group/status-parent flex h-[30px] items-center gap-[6px] px-[14px] text-[12px]" aria-disabled="true">Export ▾ <ImplementationStatusIcon label="Not implemented" description="Client export is not available yet." withinInteractiveControl /></SecondaryButton>
         </div>
       </div>
 
-      {showForm && (
+      {canCreateClient && showForm && (
         <form
           onSubmit={handleSubmit}
-          className="mx-[16px] mb-[14px] overflow-hidden rounded-none border border-yb-line border-t-[3px] border-t-yb-green bg-white"
+          className="yb-card mx-[16px] mb-[14px] overflow-hidden rounded-none border border-yb-line border-t-[3px] border-t-yb-green bg-white"
         >
           <div className="flex items-center border-b border-yb-line-soft px-[16px] py-[10px]">
             <div className="text-[14px] font-black text-yb-ink">New client</div>
@@ -254,7 +259,7 @@ function ClientsPage() {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Feldman Household"
-                    className="h-[28px] w-full border border-[#8d968e] bg-white px-[7px] text-[13px] text-yb-ink outline-none focus:outline-2 focus:outline-yb-green"
+                    className="h-[28px] w-full border border-yb-line-btn bg-white px-[7px] text-[13px] text-yb-ink outline-none focus:outline-2 focus:outline-yb-green"
                   />
                   <div className="mt-[3px] text-[11px] text-yb-muted4">
                     How the client appears on requests and invoices.
@@ -274,7 +279,7 @@ function ClientsPage() {
                     value={phoneNumber}
                     onChange={(e) => setPhoneNumber(e.target.value)}
                     placeholder="+1 212 555 0123"
-                    className="h-[28px] w-full border border-[#8d968e] bg-white px-[7px] text-[13px] text-yb-ink outline-none focus:outline-2 focus:outline-yb-green"
+                    className="h-[28px] w-full border border-yb-line-btn bg-white px-[7px] text-[13px] text-yb-ink outline-none focus:outline-2 focus:outline-yb-green"
                   />
                   <div className="mt-[3px] text-[11px] text-yb-muted4">
                     Used to link WhatsApp conversations and prevent duplicate clients.
@@ -285,7 +290,7 @@ function ClientsPage() {
               <div className="mb-[12px] grid grid-cols-[118px_minmax(0,1fr)] items-baseline gap-x-[12px]">
                 <div className="pt-[6px] text-right text-[12px] text-yb-ink2">Client type</div>
                 <div>
-                  <div className="flex h-[28px] overflow-hidden border border-[#8d968e]">
+                  <div className="flex h-[28px] overflow-hidden border border-yb-line-btn">
                     {(["Household", "Company", "Individual"] as const).map((type) => (
                       <button
                         key={type}
@@ -321,7 +326,7 @@ function ClientsPage() {
                     id="preferred-rep"
                     value={preferredRepId}
                     onChange={(e) => setPreferredRepId(e.target.value)}
-                    className="h-[28px] w-full border border-[#8d968e] bg-white px-[4px] text-[13px] text-yb-ink"
+                    className="h-[28px] w-full border border-yb-line-btn bg-white px-[4px] text-[13px] text-yb-ink"
                   >
                     <option value="">Unassigned</option>
                     {(repsQuery.data ?? []).map((r) => (
@@ -344,7 +349,7 @@ function ClientsPage() {
                     id="secondary-rep"
                     value={secondaryRepId}
                     onChange={(e) => setSecondaryRepId(e.target.value)}
-                    className="h-[28px] w-full border border-[#8d968e] bg-white px-[4px] text-[13px] text-yb-ink"
+                    className="h-[28px] w-full border border-yb-line-btn bg-white px-[4px] text-[13px] text-yb-ink"
                   >
                     <option value="">Unassigned</option>
                     {(repsQuery.data ?? []).map((r) => (
@@ -366,7 +371,7 @@ function ClientsPage() {
                       required
                       value={bookingFeeGroupId}
                       onChange={(e) => setBookingFeeGroupId(e.target.value)}
-                      className="h-[28px] w-full border border-[#8d968e] bg-white px-[4px] text-[13px] text-yb-ink"
+                      className="h-[28px] w-full border border-yb-line-btn bg-white px-[4px] text-[13px] text-yb-ink"
                     >
                       {(feeGroupsQuery.data ?? []).map((group) => (
                         <option key={group.id} value={group.id}>
@@ -402,7 +407,7 @@ function ClientsPage() {
               )}
             </div>
 
-            <aside className="border-l border-yb-line-soft bg-[#f9faf8] px-[18px] py-[16px]">
+            <aside className="border-l border-yb-line-soft bg-yb-panel-head px-[18px] py-[16px]">
               <div className="mb-[8px] text-[10px] font-bold tracking-[1.2px] text-yb-muted2">
                 WHAT HAPPENS NEXT
               </div>
@@ -418,7 +423,7 @@ function ClientsPage() {
             </aside>
           </div>
 
-          <div className="flex items-center gap-[10px] border-t border-yb-line bg-[#f2f5f0] px-[16px] py-[10px]">
+          <div className="flex items-center gap-[10px] border-t border-yb-line bg-yb-panel-head px-[16px] py-[10px]">
             <div className="text-[11px] text-yb-muted4">Enter to create · Esc to cancel</div>
             <div className="flex-1" />
             <SecondaryButton className="h-[30px] px-[16px] text-[12px]" type="button" onClick={closeForm}>

@@ -42,7 +42,7 @@ async function main() {
       { travellerId: travellerIds[0], category: "adult" },
       { travellerId: travellerIds[1], category: "child" },
       { travellerId: travellerIds[2], category: "infant" },
-    ], actorId);
+    ], actorId, ["requests.assign_any"]);
     const expectedUnits = Number(feeGroup.charge_adults) + Number(feeGroup.charge_children) + Number(feeGroup.charge_infants);
     assert.equal(quote.chargedUnits, expectedUnits);
     assert.equal(quote.totalAmount, (Number(feeGroup.amount) * expectedUnits).toFixed(2));
@@ -63,7 +63,7 @@ async function main() {
     const savedDocument = await records.addDocument(clientId, requestId,
       { originalname: "test.png", mimetype: "image/png", buffer: png, size: png.length }, "Test document", actorId);
     documentId = savedDocument.id;
-    const downloaded = await records.downloadDocument(Number(savedDocument.id), actorId);
+    const downloaded = await records.downloadDocument(Number(savedDocument.id), actorId, ["requests.assign_any"]);
     assert.deepEqual(downloaded.content, png);
     const activity = await records.activity(clientId, requestId);
     assert.ok(activity.some((item) => item.type === "note") && activity.some((item) => item.type === "document"));

@@ -15,10 +15,10 @@ import {
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { z, ZodError } from "zod";
-import { AllowedRoles } from "../auth/allowed-roles.decorator";
+import { AllowedPermissions } from "../auth/allowed-permissions.decorator";
 import { AuthGuard } from "../auth/auth.guard";
 import type { AuthenticatedRequest } from "../auth/auth.guard";
-import { RoleGuard } from "../auth/role.guard";
+import { PermissionGuard } from "../auth/permission.guard";
 import { MessagingService } from "./messaging.service";
 import { DraftIntakesService } from "./draft-intakes.service";
 import {
@@ -60,6 +60,23 @@ const updateDraftIntakeSchema = z.object({
   returnDateText: z.string().trim().max(100).nullable(),
   missingInformation: z.array(z.string().trim().min(1).max(200)).max(20),
   suggestedReply: z.string().trim().max(2000).nullable(),
+  bookingResolution: z.enum(["matched", "new_booking", "ambiguous"]),
+  matchedTravelRequestId: z.number().int().positive().nullable(),
+}).superRefine((input, context) => {
+  if (input.bookingResolution === "matched" && input.matchedTravelRequestId === null) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["matchedTravelRequestId"],
+      message: "Select an open booking",
+    });
+  }
+  if (input.bookingResolution !== "matched" && input.matchedTravelRequestId !== null) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["matchedTravelRequestId"],
+      message: "Only a matched booking can have a booking ID",
+    });
+  }
 });
 
 const createGroupSchema = z
@@ -90,7 +107,7 @@ const createGroupSchema = z
   });
 
 @Controller("messaging")
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, PermissionGuard)
 export class MessagingController {
   constructor(
     private readonly messaging: MessagingService,
@@ -99,18 +116,19 @@ export class MessagingController {
   ) {}
 
   @Get("status")
+  @AllowedPermissions("whatsapp.read")
   getStatus() {
     return this.messaging.getStatus();
   }
 
   @Get("accounts")
+  @AllowedPermissions("whatsapp.read")
   listAccounts() {
     return this.messaging.listAccounts();
   }
 
   @Post("accounts")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("system_administrator")
+  @AllowedPermissions("whatsapp.manage_accounts")
   createAccount(@Req() request: AuthenticatedRequest, @Body() body: unknown) {
     try {
       const input = createAccountSchema.parse(body);
@@ -122,39 +140,37 @@ export class MessagingController {
   }
 
   @Post("accounts/:id/reconnect")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("system_administrator")
+  @AllowedPermissions("whatsapp.manage_accounts")
   reconnectAccount(@Param("id", ParseIntPipe) id: number) {
     return this.messaging.reconnect(id);
   }
 
   @Post("accounts/:id/disconnect")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("system_administrator")
+  @AllowedPermissions("whatsapp.manage_accounts")
   disconnectAccount(@Param("id", ParseIntPipe) id: number, @Req() request: AuthenticatedRequest) {
     return this.messaging.disconnect(request.user.id, id);
   }
 
   @Post("reconnect")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("system_administrator")
+  @AllowedPermissions("whatsapp.manage_accounts")
   reconnect() {
     return this.messaging.reconnect();
   }
 
   @Post("disconnect")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("system_administrator")
+  @AllowedPermissions("whatsapp.manage_accounts")
   disconnect(@Req() request: AuthenticatedRequest) {
     return this.messaging.disconnect(request.user.id);
   }
 
   @Get("conversations")
+  @AllowedPermissions("whatsapp.read")
   listConversations() {
     return this.messaging.listConversations();
   }
 
   @Post("conversations")
+  @AllowedPermissions("whatsapp.send")
   startConversation(@Body() body: unknown): Promise<{ id: number }> {
     try {
       const input = startConversationSchema.parse(body);
@@ -166,18 +182,19 @@ export class MessagingController {
   }
 
   @Get("conversations/:id/messages")
+  @AllowedPermissions("whatsapp.read")
   listMessages(@Param("id", ParseIntPipe) id: number) {
     return this.messaging.listMessages(id);
   }
 
   @Get("delivery-failures")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("system_administrator")
+  @AllowedPermissions("integrations.manage")
   listDeliveryFailures() {
     return this.messaging.listDeliveryFailures();
   }
 
   @Get("messages/:id/audio")
+  @AllowedPermissions("whatsapp.read")
   async getMessageAudio(@Param("id", ParseIntPipe) id: number): Promise<StreamableFile> {
     const audio = await this.messaging.getMessageAudio(id);
     return new StreamableFile(audio.data, {
@@ -188,8 +205,7 @@ export class MessagingController {
   }
 
   @Post("messages/:id/retry")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  @AllowedPermissions("whatsapp.send")
   async retryFailedMessage(
     @Param("id", ParseIntPipe) id: number,
     @Req() request: AuthenticatedRequest,
@@ -199,13 +215,13 @@ export class MessagingController {
   }
 
   @Get("conversations/:id/draft-intakes")
+  @AllowedPermissions("whatsapp.read")
   listDraftIntakes(@Param("id", ParseIntPipe) id: number) {
     return this.draftIntakes.list(id);
   }
 
   @Post("conversations/:id/draft-intakes/analyze-latest")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  @AllowedPermissions("requests.update")
   analyzeLatestDraft(
     @Param("id", ParseIntPipe) id: number,
     @Req() request: AuthenticatedRequest,
@@ -214,8 +230,7 @@ export class MessagingController {
   }
 
   @Patch("draft-intakes/:id")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  @AllowedPermissions("requests.update")
   updateDraftIntake(
     @Param("id", ParseIntPipe) id: number,
     @Req() request: AuthenticatedRequest,
@@ -230,8 +245,7 @@ export class MessagingController {
   }
 
   @Post("draft-intakes/:id/reject")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  @AllowedPermissions("requests.update")
   rejectDraftIntake(
     @Param("id", ParseIntPipe) id: number,
     @Req() request: AuthenticatedRequest,
@@ -240,8 +254,7 @@ export class MessagingController {
   }
 
   @Post("draft-intakes/:id/create-request")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  @AllowedPermissions("requests.create")
   createRequestFromDraft(
     @Param("id", ParseIntPipe) id: number,
     @Req() request: AuthenticatedRequest,
@@ -249,19 +262,33 @@ export class MessagingController {
     return this.draftIntakes.createRequest(id, request.user.id);
   }
 
+  /**
+   * Applies a reviewed draft to the selected existing booking context.
+   * The service revalidates ownership and open status before changing data.
+   */
+  @Post("draft-intakes/:id/apply-to-booking")
+  @AllowedPermissions("requests.update")
+  applyDraftToBooking(
+    @Param("id", ParseIntPipe) id: number,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.draftIntakes.applyToBooking(id, request.user.id, request.user.permissions);
+  }
+
   @Get("groups/options")
+  @AllowedPermissions("whatsapp.read")
   groupOptions(): Promise<WhatsAppGroupOptions> {
     return this.groups.getOptions();
   }
 
   @Get("groups")
+  @AllowedPermissions("whatsapp.read")
   listGroups(): Promise<WhatsAppGroupRecord[]> {
     return this.groups.list();
   }
 
   @Post("groups")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("travel_agent", "system_administrator")
+  @AllowedPermissions("whatsapp.create_groups")
   createGroup(
     @Req() request: AuthenticatedRequest,
     @Body() body: unknown,
@@ -275,8 +302,7 @@ export class MessagingController {
   }
 
   @Post("conversations/:id/messages")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  @AllowedPermissions("whatsapp.send")
   async sendMessage(
     @Param("id", ParseIntPipe) id: number,
     @Req() request: AuthenticatedRequest,
@@ -293,8 +319,7 @@ export class MessagingController {
   }
 
   @Post("conversations/:id/voice-notes")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  @AllowedPermissions("whatsapp.send")
   @UseInterceptors(FileInterceptor("audio", { limits: { fileSize: 10 * 1024 * 1024, files: 1 } }))
   async sendVoiceNote(
     @Param("id", ParseIntPipe) id: number,

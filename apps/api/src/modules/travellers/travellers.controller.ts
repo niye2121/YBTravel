@@ -1,8 +1,9 @@
-import { BadRequestException, Body, Controller, Get, Param, ParseIntPipe, Post, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Param, ParseIntPipe, Post, Req, UseGuards } from "@nestjs/common";
 import { z, ZodError } from "zod";
 import type { Traveller } from "@yb-travel/shared";
-import { AdminGuard } from "../auth/admin.guard";
 import { AuthGuard, type AuthenticatedRequest } from "../auth/auth.guard";
+import { AllowedPermissions } from "../auth/allowed-permissions.decorator";
+import { PermissionGuard } from "../auth/permission.guard";
 import { TravellersService } from "./travellers.service";
 
 /**
@@ -42,31 +43,38 @@ const createTravellerSchema = z
   });
 
 @Controller("travellers")
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, PermissionGuard)
 export class TravellersController {
   constructor(private readonly travellersService: TravellersService) {}
 
   @Get()
+  @AllowedPermissions("travellers.read")
   list(): Promise<Traveller[]> {
     return this.travellersService.list();
   }
 
   @Get(":id")
+  @AllowedPermissions("travellers.read")
   getById(@Param("id", ParseIntPipe) id: number, @Req() request: AuthenticatedRequest): Promise<Traveller> {
     return this.travellersService.getById(id, request.user.id, request.ip, request.headers["user-agent"]);
   }
 
   @Get(":id/sensitive-access-history")
-  @UseGuards(AdminGuard)
+  @AllowedPermissions("audit.read")
   accessHistory(@Param("id", ParseIntPipe) id: number) {
     return this.travellersService.getSensitiveAccessHistory(id);
   }
 
   @Post()
+  @AllowedPermissions("travellers.create")
   create(@Req() request: AuthenticatedRequest, @Body() body: unknown): Promise<Traveller> {
     try {
+      const input = createTravellerSchema.parse(body);
+      if (input.links.length > 0 && !request.user.permissions.includes("travellers.link")) {
+        throw new ForbiddenException("Linking a traveller to a client requires travellers.link permission");
+      }
       return this.travellersService.create(
-        createTravellerSchema.parse(body),
+        input,
         request.user.id,
         request.ip,
         request.headers["user-agent"],

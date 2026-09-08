@@ -12,11 +12,13 @@ import { AppHeader } from "../components/AppShell/AppHeader";
 import { PrimaryButton, SecondaryButton } from "../components/AppShell/buttons";
 import { requestWorkflowSettingsApi, usersApi } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
-import { getStoredUser, hasAdminRole } from "../lib/session";
+import { getStoredUser, hasPermission } from "../lib/session";
+import { PermissionMatrix, roleTemplatePermissions } from "../components/PermissionMatrix";
+import { useAuth } from "../lib/AuthContext";
 
 export const Route = createFileRoute("/users/$userId")({
   beforeLoad: () => {
-    if (!hasAdminRole(getStoredUser())) throw redirect({ to: "/" });
+    if (!hasPermission(getStoredUser(), "users.manage")) throw redirect({ to: "/" });
   },
   component: EmployeeDetailPage,
 });
@@ -38,6 +40,7 @@ function fieldFromEmployee(employee: EmployeeDetail): UpdateEmployeeInput {
     email: employee.email,
     phoneNumber: employee.phoneNumber ?? "",
     roles: employee.roles.filter((role): role is PhaseOneRole => PHASE_ONE_ROLES.includes(role as PhaseOneRole)),
+    permissions: employee.permissions,
     active: employee.active,
     availabilityStatus: employee.availabilityStatus,
     capacityLimit: employee.capacityLimit,
@@ -55,6 +58,7 @@ function DetailField({ label, children }: { label: string; children: ReactNode }
 }
 
 function EmployeeDetailPage() {
+  const { can } = useAuth();
   const { userId: userIdParam } = Route.useParams();
   const userId = Number(userIdParam);
   const queryClient = useQueryClient();
@@ -100,7 +104,11 @@ function EmployeeDetailPage() {
   }
 
   function toggleRole(role: PhaseOneRole) {
-    setDraft((current) => current ? { ...current, roles: current.roles.includes(role) ? current.roles.filter((item) => item !== role) : [...current.roles, role] } : current);
+    setDraft((current) => {
+      if (!current) return current;
+      const roles = current.roles.includes(role) ? current.roles.filter((item) => item !== role) : [...current.roles, role];
+      return { ...current, roles, permissions: roleTemplatePermissions(roles) };
+    });
   }
 
   if (employeeQuery.isLoading) {
@@ -119,7 +127,7 @@ function EmployeeDetailPage() {
         <div className="mb-[12px] flex items-end gap-[12px]">
           <div>
             <div className="text-[10px] font-bold tracking-[1.3px] text-yb-muted4">EMPLOYEE PROFILE</div>
-            <div className="mt-[2px] flex items-center gap-[9px]"><h1 className="text-[25px] font-black">{employee.name}</h1><span className={`border px-[7px] py-[2px] text-[10.5px] font-bold ${employee.active ? "border-yb-green/30 bg-yb-success text-yb-green" : "border-yb-red/30 bg-red-50 text-yb-red"}`}>{employee.active ? "Active" : "Inactive"}</span></div>
+            <div className="mt-[2px] flex items-center gap-[9px]"><h1 className="yb-page-title">{employee.name}</h1><span className={`border px-[7px] py-[2px] text-[10.5px] font-bold ${employee.active ? "border-yb-green/30 bg-yb-success text-yb-green" : "border-yb-red/30 bg-red-50 text-yb-red"}`}>{employee.active ? "Active" : "Inactive"}</span></div>
             <div className="mt-[2px] text-[12px] text-yb-muted3">Created {new Date(employee.createdAt).toLocaleDateString()} · Employee #{employee.id}</div>
           </div>
           <div className="flex-1" />
@@ -131,13 +139,14 @@ function EmployeeDetailPage() {
 
         {!editing ? (
           <>
-            <section className="grid grid-cols-[1.35fr_0.65fr] border border-yb-line border-t-[3px] border-t-yb-green bg-white">
+            <section className="yb-card grid grid-cols-[1.35fr_0.65fr] border border-yb-line border-t-[3px] border-t-yb-green bg-white">
               <div className="border-r border-yb-line">
                 <div className="border-b border-yb-line bg-yb-panel-head px-[14px] py-[8px] text-[10.5px] font-bold tracking-[1.1px] text-yb-panel-head-text">EMPLOYEE DETAILS</div>
                 <div className="grid grid-cols-3 gap-x-[24px] gap-y-[18px] px-[15px] py-[15px]">
                   <DetailField label="Email">{employee.email}</DetailField>
                   <DetailField label="WhatsApp phone">{employee.phoneNumber ?? "Not provided"}</DetailField>
                   <DetailField label="Roles">{employee.roles.map((role) => ROLE_LABELS[role]).join(", ")}</DetailField>
+                  <DetailField label="Permissions">{employee.permissions.length} enabled</DetailField>
                   <DetailField label="Availability"><span className="font-bold capitalize text-yb-green">{employee.availabilityStatus}</span></DetailField>
                   <DetailField label="Working timezone">{employee.timezone}</DetailField>
                   <DetailField label="Working hours">{employee.workdayStart.slice(0, 5)}–{employee.workdayEnd.slice(0, 5)}</DetailField>
@@ -157,14 +166,14 @@ function EmployeeDetailPage() {
               </aside>
             </section>
 
-            <section className="mt-[14px] border border-yb-line bg-white">
+            <section className="yb-card mt-[14px] border border-yb-line bg-white">
               <div className="flex items-center border-b border-yb-line bg-yb-panel-head px-[14px] py-[8px]"><div className="text-[10.5px] font-bold tracking-[1.1px] text-yb-panel-head-text">RECENT ASSIGNMENT ACTIVITY</div><div className="flex-1" /><div className="text-[11px] text-yb-muted3">Last 20 events</div></div>
-              <table className="w-full border-collapse text-[12px]"><thead><tr className="bg-yb-table-head"><th className="px-[12px] py-[7px] text-left">Request</th><th className="px-[8px] py-[7px] text-left">Client</th><th className="px-[8px] py-[7px] text-left">Event</th><th className="px-[8px] py-[7px] text-left">Reason</th><th className="px-[12px] py-[7px] text-right">When</th></tr></thead><tbody>{employee.recentAssignmentActivity.map((activity) => <tr key={activity.id} className="border-t border-yb-line-row"><td className="px-[12px] py-[9px]"><Link to="/requests/$requestId" params={{ requestId: String(activity.requestId) }} className="font-bold text-yb-green underline">{activity.requestNumber}</Link></td><td className="px-[8px] py-[9px]">{activity.clientName}</td><td className="px-[8px] py-[9px] capitalize">{activity.eventType.replaceAll("_", " ")} · {activity.routingLevel}</td><td className="px-[8px] py-[9px] text-yb-muted3">{activity.explanation}</td><td className="px-[12px] py-[9px] text-right text-yb-muted3">{new Date(activity.createdAt).toLocaleString()}</td></tr>)}</tbody></table>
+              <table className="w-full border-collapse text-[12px]"><thead><tr className="bg-yb-table-head"><th className="px-[12px] py-[7px] text-left">Request</th><th className="px-[8px] py-[7px] text-left">Client</th><th className="px-[8px] py-[7px] text-left">Event</th><th className="px-[8px] py-[7px] text-left">Reason</th><th className="px-[12px] py-[7px] text-right">When</th></tr></thead><tbody>{employee.recentAssignmentActivity.map((activity) => <tr key={activity.id} className="border-t border-yb-line-row"><td className="px-[12px] py-[9px]">{can("requests.read") ? <Link to="/requests/$requestId" params={{ requestId: String(activity.requestId) }} className="font-bold text-yb-green underline">{activity.requestNumber}</Link> : <span className="font-bold">{activity.requestNumber}</span>}</td><td className="px-[8px] py-[9px]">{activity.clientName}</td><td className="px-[8px] py-[9px] capitalize">{activity.eventType.replaceAll("_", " ")} · {activity.routingLevel}</td><td className="px-[8px] py-[9px] text-yb-muted3">{activity.explanation}</td><td className="px-[12px] py-[9px] text-right text-yb-muted3">{new Date(activity.createdAt).toLocaleString()}</td></tr>)}</tbody></table>
               {employee.recentAssignmentActivity.length === 0 && <div className="px-[14px] py-[24px] text-center text-[12px] text-yb-muted3">No requests have been assigned to this employee yet.</div>}
             </section>
           </>
         ) : (
-          <form onSubmit={submit} className="border border-yb-line border-t-[3px] border-t-yb-green bg-white">
+          <form onSubmit={submit} className="yb-card border border-yb-line border-t-[3px] border-t-yb-green bg-white">
             <div className="border-b border-yb-line bg-yb-panel-head px-[14px] py-[9px]"><div className="text-[11px] font-bold tracking-[1px] text-yb-panel-head-text">EDIT EMPLOYEE, AVAILABILITY &amp; CAPACITY</div><div className="mt-[2px] text-[11px] text-yb-muted3">Changes affect future assignment recommendations immediately and are recorded in the audit history.</div></div>
             <div className="grid grid-cols-4 gap-[13px] px-[14px] py-[13px]">
               <label className="text-[11.5px] font-bold text-yb-muted">Name<input required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} className={controlClass} /></label>
@@ -173,6 +182,7 @@ function EmployeeDetailPage() {
               <label className="text-[11.5px] font-bold text-yb-muted">Account status<select value={draft.active ? "active" : "inactive"} onChange={(event) => setDraft({ ...draft, active: event.target.value === "active" })} className={controlClass}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
             </div>
             <div className="border-t border-yb-line-soft px-[14px] py-[12px]"><div className="mb-[7px] text-[11.5px] font-bold text-yb-muted">Employee roles</div><div className="flex gap-[9px]">{PHASE_ONE_ROLES.map((role) => <label key={role} className="flex items-center gap-[5px] border border-yb-line-btn px-[9px] py-[6px] text-[12px]"><input type="checkbox" checked={draft.roles.includes(role)} onChange={() => toggleRole(role)} />{ROLE_LABELS[role]}</label>)}</div></div>
+            <div className="border-t border-yb-line-soft px-[14px] py-[12px]"><PermissionMatrix permissions={draft.permissions} onChange={(permissions) => setDraft({ ...draft, permissions })} /></div>
             <div className="grid grid-cols-4 gap-[13px] border-t border-yb-line-soft px-[14px] py-[12px]">
               <label className="text-[11.5px] font-bold text-yb-muted">Availability<select value={draft.availabilityStatus} onChange={(event) => setDraft({ ...draft, availabilityStatus: event.target.value as UpdateEmployeeInput["availabilityStatus"] })} className={controlClass}><option value="available">Available</option><option value="unavailable">Unavailable</option><option value="absent">Absent</option></select></label>
               <label className="text-[11.5px] font-bold text-yb-muted">Standard capacity<input type="number" min={1} max={500} value={draft.capacityLimit} onChange={(event) => setDraft({ ...draft, capacityLimit: Number(event.target.value) })} className={controlClass} /></label>

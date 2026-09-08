@@ -9,9 +9,9 @@ type PanelProps = {
 
 export function Panel({ title, right, children, pad }: PanelProps) {
   return (
-    <div className="mb-4 rounded-yb border border-yb-line bg-white">
-      <div className="flex items-center border-b border-yb-line bg-yb-panel-head px-[14px] py-2">
-        <div className="text-[11.5px] font-bold tracking-[1.1px] text-yb-panel-head-text">
+    <div className="mb-4 rounded-yb-panel border border-yb-line bg-white">
+      <div className="flex items-center rounded-t-yb-panel border-b border-yb-line bg-yb-panel-head px-[14px] py-[14px]">
+        <div className="font-mono text-[10.5px] font-medium uppercase tracking-[0.12em] text-yb-muted3">
           {title}
         </div>
         <div className="flex-1" />

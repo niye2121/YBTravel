@@ -1,12 +1,13 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import type { User } from "@yb-travel/shared";
+import type { StaffPermission, User } from "@yb-travel/shared";
 import { authApi } from "./api";
-import { clearSession, getStoredUser, hasAdminRole, saveSession } from "./session";
+import { clearSession, getStoredUser, hasAdminRole, hasPermission, saveSession } from "./session";
 import { disconnectSocket } from "./socket";
 
 type AuthContextValue = {
   user: User | null;
   isAdmin: boolean;
+  can: (permission: StaffPermission) => boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
 };
@@ -26,6 +27,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       user,
       isAdmin: hasAdminRole(user),
+      can: (permission) => hasPermission(user, permission),
       login: async (email, password) => {
         const { token, user: loggedInUser } = await authApi.login(email, password);
         disconnectSocket();

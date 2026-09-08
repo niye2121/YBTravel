@@ -11,10 +11,9 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { z, ZodError } from "zod";
-import { AdminGuard } from "../auth/admin.guard";
 import { AuthGuard, type AuthenticatedRequest } from "../auth/auth.guard";
-import { AllowedRoles } from "../auth/allowed-roles.decorator";
-import { RoleGuard } from "../auth/role.guard";
+import { AllowedPermissions } from "../auth/allowed-permissions.decorator";
+import { PermissionGuard } from "../auth/permission.guard";
 import {
   BookingFeesService,
   type BookingFeeGroup,
@@ -74,25 +73,26 @@ function parseInput(body: unknown): BookingFeeGroupInput {
 }
 
 @Controller("booking-fees")
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, PermissionGuard)
 export class BookingFeesController {
   constructor(private readonly bookingFeesService: BookingFeesService) {}
 
   /** Active groups are available to logged-in intake staff for client assignment. */
   @Get()
+  @AllowedPermissions("fees.read")
   listActive(): Promise<BookingFeeGroup[]> {
     return this.bookingFeesService.list(true);
   }
 
   /** Administrators need inactive records too, so they can reactivate or edit them. */
   @Get("admin")
-  @UseGuards(AdminGuard)
+  @AllowedPermissions("settings.manage")
   listAll(): Promise<BookingFeeGroup[]> {
     return this.bookingFeesService.list(false);
   }
 
   @Post()
-  @UseGuards(AdminGuard)
+  @AllowedPermissions("settings.manage")
   create(
     @Req() request: AuthenticatedRequest,
     @Body() body: unknown,
@@ -101,7 +101,7 @@ export class BookingFeesController {
   }
 
   @Patch(":id")
-  @UseGuards(AdminGuard)
+  @AllowedPermissions("settings.manage")
   update(
     @Param("id", ParseIntPipe) id: number,
     @Req() request: AuthenticatedRequest,
@@ -111,17 +111,22 @@ export class BookingFeesController {
   }
 
   @Get("requests/:requestId")
+  @AllowedPermissions("fees.read")
   requestFee(@Param("requestId", ParseIntPipe) requestId: number) {
     return this.bookingFeesService.getRequestFee(requestId);
   }
 
   @Post("requests/:requestId")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  @AllowedPermissions("fees.calculate")
   saveRequestFee(@Param("requestId", ParseIntPipe) requestId: number, @Req() request: AuthenticatedRequest, @Body() body: unknown) {
     try {
       const input = requestPassengersSchema.parse(body);
-      return this.bookingFeesService.saveRequestFee(requestId, input.passengers, request.user.id);
+      return this.bookingFeesService.saveRequestFee(
+        requestId,
+        input.passengers,
+        request.user.id,
+        request.user.permissions,
+      );
     } catch (error) {
       if (error instanceof ZodError) throw new BadRequestException(error.flatten().fieldErrors);
       throw error;

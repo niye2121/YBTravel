@@ -67,8 +67,9 @@ async function main() {
       "login throttling must return HTTP 429",
     );
 
+    const account = await pool.query("SELECT id FROM whatsapp_connections WHERE is_primary = true LIMIT 1");
     conversationId = await conversations.findOrCreateConversation(
-      `security-${stamp}@s.whatsapp.net`, `1555${String(Date.now()).slice(-7)}`, "Security Test",
+      account.rows[0].id, `security-${stamp}@s.whatsapp.net`, `1555${String(Date.now()).slice(-7)}`, "Security Test",
     );
     const first = await conversations.appendInboundMessage(conversationId, "hello", "sender", `provider-${stamp}`);
     const duplicate = await conversations.appendInboundMessage(conversationId, "hello", "sender", `provider-${stamp}`);

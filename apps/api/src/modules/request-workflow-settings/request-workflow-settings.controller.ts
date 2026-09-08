@@ -1,7 +1,8 @@
 import { BadRequestException, Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Req, UseGuards } from "@nestjs/common";
 import { z, ZodError } from "zod";
-import { AdminGuard } from "../auth/admin.guard";
 import { AuthGuard, type AuthenticatedRequest } from "../auth/auth.guard";
+import { AllowedPermissions } from "../auth/allowed-permissions.decorator";
+import { PermissionGuard } from "../auth/permission.guard";
 import { RequestWorkflowSettingsService, type RequestSettingInput, type UrgencyLevelInput } from "./request-workflow-settings.service";
 
 const settingSchema = z.object({
@@ -43,15 +44,15 @@ function parseUrgency(body: unknown): UrgencyLevelInput {
 }
 
 @Controller("request-workflow-settings")
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, PermissionGuard)
 export class RequestWorkflowSettingsController {
   constructor(private readonly service: RequestWorkflowSettingsService) {}
-  @Get() listActive() { return this.service.get(true); }
-  @Get("admin") @UseGuards(AdminGuard) listAll() { return this.service.get(false); }
-  @Post("types") @UseGuards(AdminGuard) createType(@Req() req: AuthenticatedRequest, @Body() body: unknown) { return this.service.createType(parse(body), req.user.id); }
-  @Patch("types/:id") @UseGuards(AdminGuard) updateType(@Param("id", ParseIntPipe) id: number, @Req() req: AuthenticatedRequest, @Body() body: unknown) { return this.service.updateType(id, parse(body), req.user.id); }
-  @Post("statuses") @UseGuards(AdminGuard) createStatus(@Req() req: AuthenticatedRequest, @Body() body: unknown) { return this.service.createStatus(parse(body), req.user.id); }
-  @Patch("statuses/:id") @UseGuards(AdminGuard) updateStatus(@Param("id", ParseIntPipe) id: number, @Req() req: AuthenticatedRequest, @Body() body: unknown) { return this.service.updateStatus(id, parse(body), req.user.id); }
-  @Post("urgency-levels") @UseGuards(AdminGuard) createUrgency(@Req() req: AuthenticatedRequest, @Body() body: unknown) { return this.service.createUrgency(parseUrgency(body), req.user.id); }
-  @Patch("urgency-levels/:id") @UseGuards(AdminGuard) updateUrgency(@Param("id", ParseIntPipe) id: number, @Req() req: AuthenticatedRequest, @Body() body: unknown) { return this.service.updateUrgency(id, parseUrgency(body), req.user.id); }
+  @Get() @AllowedPermissions("requests.read") listActive() { return this.service.get(true); }
+  @Get("admin") @AllowedPermissions("settings.manage") listAll() { return this.service.get(false); }
+  @Post("types") @AllowedPermissions("settings.manage") createType(@Req() req: AuthenticatedRequest, @Body() body: unknown) { return this.service.createType(parse(body), req.user.id); }
+  @Patch("types/:id") @AllowedPermissions("settings.manage") updateType(@Param("id", ParseIntPipe) id: number, @Req() req: AuthenticatedRequest, @Body() body: unknown) { return this.service.updateType(id, parse(body), req.user.id); }
+  @Post("statuses") @AllowedPermissions("settings.manage") createStatus(@Req() req: AuthenticatedRequest, @Body() body: unknown) { return this.service.createStatus(parse(body), req.user.id); }
+  @Patch("statuses/:id") @AllowedPermissions("settings.manage") updateStatus(@Param("id", ParseIntPipe) id: number, @Req() req: AuthenticatedRequest, @Body() body: unknown) { return this.service.updateStatus(id, parse(body), req.user.id); }
+  @Post("urgency-levels") @AllowedPermissions("settings.manage") createUrgency(@Req() req: AuthenticatedRequest, @Body() body: unknown) { return this.service.createUrgency(parseUrgency(body), req.user.id); }
+  @Patch("urgency-levels/:id") @AllowedPermissions("settings.manage") updateUrgency(@Param("id", ParseIntPipe) id: number, @Req() req: AuthenticatedRequest, @Body() body: unknown) { return this.service.updateUrgency(id, parseUrgency(body), req.user.id); }
 }

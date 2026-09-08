@@ -383,6 +383,11 @@ export class MessagingService implements OnModuleInit {
       const client = await this.pool.connect();
       try {
         await client.query("BEGIN");
+        await client.query(
+          `UPDATE travel_requests SET first_response_at = COALESCE(first_response_at, now()), updated_at = now()
+           WHERE id = $1`,
+          [travelRequestId],
+        );
         await recordAudit(
           client,
           actorUserId,

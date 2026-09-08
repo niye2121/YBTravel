@@ -6,10 +6,10 @@ import { AppHeader } from "../components/AppShell/AppHeader";
 import { PrimaryButton, SecondaryButton } from "../components/AppShell/buttons";
 import { messagingApi } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
-import { getStoredUser, hasAdminRole } from "../lib/session";
+import { getStoredUser, hasPermission } from "../lib/session";
 
 export const Route = createFileRoute("/whatsapp-accounts")({
-  beforeLoad: () => { if (!hasAdminRole(getStoredUser())) throw redirect({ to: "/" }); },
+  beforeLoad: () => { if (!hasPermission(getStoredUser(), "whatsapp.manage_accounts")) throw redirect({ to: "/" }); },
   component: WhatsAppAccountsPage,
 });
 
@@ -42,18 +42,18 @@ function WhatsAppAccountsPage() {
 
   const mutationError = createMutation.error ?? reconnectMutation.error ?? disconnectMutation.error;
   return (
-    <div className="min-h-screen min-w-[1180px] bg-[#eef0ea] text-yb-ink">
+    <div className="min-h-screen min-w-[1180px] bg-yb-canvas text-yb-ink">
       <AppHeader tabs={NAV_TABS} />
       <div className="flex items-end gap-[14px] px-[22px] py-[16px]">
         <div className="flex-1">
           <div className="text-[10px] font-bold tracking-[1.3px] text-yb-muted4">SETUP · WHATSAPP</div>
-          <h1 className="text-[25px] font-black">WhatsApp accounts</h1>
+          <h1 className="yb-page-title">WhatsApp accounts</h1>
           <p className="mt-[3px] text-[13px] text-yb-muted3">Each number has its own saved session. Conversations remain in YB Travel if a number is disconnected or replaced.</p>
         </div>
         <Link to="/setup" className="text-[12px] font-bold text-yb-green underline">Back to Setup</Link>
       </div>
 
-      <form onSubmit={submit} className="mx-[22px] mb-[14px] flex items-end gap-[10px] border border-yb-line border-t-[3px] border-t-yb-green bg-white p-[14px]">
+      <form onSubmit={submit} className="yb-card mx-[22px] mb-[14px] flex items-end gap-[10px] border border-yb-line border-t-[3px] border-t-yb-green bg-white p-[14px]">
         <label className="flex-1 text-[12px] font-bold">New account name
           <input value={label} onChange={(event) => setLabel(event.target.value)} maxLength={80} placeholder="For example: Brooklyn Sales" className="mt-[5px] h-[34px] w-full border border-yb-line-btn px-[9px] text-[13px] font-normal" />
         </label>
@@ -64,7 +64,7 @@ function WhatsAppAccountsPage() {
 
       <div className="mx-[22px] grid grid-cols-2 gap-[14px] pb-[28px]">
         {(accountsQuery.data ?? []).map((account) => (
-          <section key={account.id} className="border border-yb-line border-t-[3px] border-t-yb-green bg-white">
+          <section key={account.id} className="yb-card border border-yb-line border-t-[3px] border-t-yb-green bg-white">
             <div className="flex items-start gap-[12px] border-b border-yb-line-soft bg-yb-panel-head px-[14px] py-[11px]">
               <div className="flex-1">
                 <div className="flex items-center gap-[7px]"><h2 className="text-[16px] font-black">{account.label}</h2>{account.isPrimary && <span className="bg-yb-gold px-[6px] py-[2px] text-[9px] font-bold">PRIMARY · EXISTING SESSION</span>}</div>

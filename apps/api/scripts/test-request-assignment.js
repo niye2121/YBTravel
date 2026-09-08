@@ -93,7 +93,7 @@ async function main() {
     throw new Error("Routing recommendation did not return an explainable candidate evaluation");
   }
   const service = new RequestsService({ connect: async () => testClient }, routing);
-  const assigned = await service.assign(request.id, target.id, actor.id, actor.roles);
+  const assigned = await service.assign(request.id, target.id, actor.id, ["requests.assign_any"]);
   await rollbackPromise;
 
   if (assigned.assignedUserId !== target.id || assigned.assignedByUserId !== actor.id) {

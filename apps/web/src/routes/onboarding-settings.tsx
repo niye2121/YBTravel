@@ -14,11 +14,11 @@ import {
   type TaskPriority,
 } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
-import { getStoredUser, hasAdminRole } from "../lib/session";
+import { getStoredUser, hasPermission } from "../lib/session";
 
 export const Route = createFileRoute("/onboarding-settings")({
   beforeLoad: () => {
-    if (!hasAdminRole(getStoredUser())) throw redirect({ to: "/" });
+    if (!hasPermission(getStoredUser(), "settings.manage")) throw redirect({ to: "/" });
   },
   component: OnboardingSettingsPage,
 });
@@ -213,7 +213,7 @@ function OnboardingSettingsPage() {
   const completionStage = stages.find((stage) => stage.completionStage);
 
   return (
-    <div className="min-w-[1280px] bg-white text-yb-ink">
+    <div className="min-h-screen min-w-[1280px] bg-yb-canvas text-yb-ink">
       <AppHeader tabs={NAV_TABS} />
 
       <div className="flex items-center gap-[14px] px-[22px] pt-[16px] pb-[14px]">
@@ -222,7 +222,7 @@ function OnboardingSettingsPage() {
         </div>
         <div>
           <div className="text-[10.5px] font-bold tracking-[1.4px] text-yb-muted4">SETUP</div>
-          <h1 className="mt-[1px] text-[26px] font-black tracking-[-0.2px]">Onboarding & Required Information</h1>
+          <h1 className="mt-[1px] yb-page-title">Onboarding & Required Information</h1>
           <p className="mt-[3px] text-[13px] text-yb-muted3">
             Configure the onboarding path, milestone tasks, missing-information rules, and completion gate.
           </p>
@@ -246,7 +246,7 @@ function OnboardingSettingsPage() {
         </div>
       </div>
 
-      <section className="mx-[22px] mb-[20px] border border-yb-line bg-white">
+      <section className="yb-card mx-[22px] mb-[20px] border border-yb-line bg-white">
         <div className="flex items-center border-b border-yb-line bg-yb-panel-head px-[14px] py-[9px]">
           <div>
             <div className="text-[11.5px] font-bold tracking-[1.1px] text-yb-panel-head-text">ONBOARDING WORKFLOW</div>
@@ -373,7 +373,7 @@ function OnboardingSettingsPage() {
         </table>
       </section>
 
-      <section className="mx-[22px] mb-[26px] border border-yb-line bg-white">
+      <section className="yb-card mx-[22px] mb-[26px] border border-yb-line bg-white">
         <div className="flex items-center border-b border-yb-line bg-yb-panel-head px-[14px] py-[9px]">
           <div>
             <div className="text-[11.5px] font-bold tracking-[1.1px] text-yb-panel-head-text">REQUIRED INFORMATION</div>

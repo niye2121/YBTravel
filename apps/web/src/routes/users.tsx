@@ -1,12 +1,13 @@
 import { Link, Outlet, createFileRoute, redirect, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { PHASE_ONE_ROLES, type PhaseOneRole, type StaffRole } from "@yb-travel/shared";
+import { PHASE_ONE_ROLES, type PhaseOneRole, type StaffPermission, type StaffRole } from "@yb-travel/shared";
 import { AppHeader } from "../components/AppShell/AppHeader";
 import { PrimaryButton, SecondaryButton } from "../components/AppShell/buttons";
 import { requestWorkflowSettingsApi, usersApi } from "../lib/api";
-import { getStoredUser, hasAdminRole } from "../lib/session";
+import { getStoredUser, hasPermission } from "../lib/session";
 import { NAV_TABS } from "../lib/navTabs";
+import { PermissionMatrix, roleTemplatePermissions } from "../components/PermissionMatrix";
 
 const ROLE_LABELS: Record<StaffRole, string> = {
   offshore_intake_employee: "Offshore Intake Employee",
@@ -56,6 +57,20 @@ const ROLE_CAPABILITIES: Record<PhaseOneRole, RoleCapability> = {
       "Receive operational-escalation authority unless explicitly designated later",
     ],
   },
+  supervisor_manager: {
+    purpose: "Works operational requests while supervising workload and reviewing completed exceptions.",
+    can: [
+      "Perform the same Phase 1 operational work as a Travel Agent",
+      "See team workload and reassign requests",
+      "Review completed markup changes and operational exceptions",
+      "Review live Phase 1 workload and follow-up reports",
+    ],
+    cannot: [
+      "Issue, change, void, exchange, or refund tickets in Phase 1",
+      "Block an agent action while waiting for supervisor review",
+      "Manage system configuration unless separately granted",
+    ],
+  },
   system_administrator: {
     purpose: "Maintains technical access, configuration, integrations, and system history.",
     can: [
@@ -76,7 +91,7 @@ export const Route = createFileRoute("/users")({
   // Belt-and-suspenders on top of the nav already hiding this tab for
   // non-admins — a direct URL visit still has to pass this check.
   beforeLoad: () => {
-    if (!hasAdminRole(getStoredUser())) {
+    if (!hasPermission(getStoredUser(), "users.manage")) {
       throw redirect({ to: "/" });
     }
   },
@@ -99,6 +114,7 @@ function UsersPage() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [password, setPassword] = useState("");
   const [roles, setRoles] = useState<PhaseOneRole[]>([]);
+  const [permissions, setPermissions] = useState<StaffPermission[]>([]);
   const [active, setActive] = useState(true);
   const [availabilityStatus, setAvailabilityStatus] = useState<"available" | "unavailable" | "absent">("available");
   const [capacityLimit, setCapacityLimit] = useState(10);
@@ -120,6 +136,7 @@ function UsersPage() {
       setPhoneNumber("");
       setPassword("");
       setRoles([]);
+      setPermissions([]);
       setActive(true);
       setAvailabilityStatus("available");
       setCapacityLimit(10);
@@ -142,7 +159,11 @@ function UsersPage() {
   });
 
   function toggleRole(role: PhaseOneRole) {
-    setRoles((prev) => (prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]));
+    setRoles((prev) => {
+      const next = prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role];
+      setPermissions(roleTemplatePermissions(next));
+      return next;
+    });
   }
 
   function handleSubmit(e: FormEvent) {
@@ -158,6 +179,7 @@ function UsersPage() {
       phoneNumber,
       password,
       roles,
+      permissions,
       active,
       availabilityStatus,
       capacityLimit,
@@ -173,7 +195,7 @@ function UsersPage() {
   if (params.userId) return <Outlet />;
 
   return (
-    <div className="min-w-[1280px] bg-white text-yb-ink">
+    <div className="min-h-screen min-w-[1280px] bg-yb-canvas text-yb-ink">
       <AppHeader tabs={NAV_TABS} />
 
       <div className="flex items-center gap-[14px] px-[22px] pt-[16px] pb-[14px]">
@@ -182,7 +204,7 @@ function UsersPage() {
         </div>
         <div>
           <div className="text-[10.5px] font-bold tracking-[1.4px] text-yb-muted4">SETUP</div>
-          <h1 className="mt-[1px] text-[26px] font-black tracking-[-0.2px]">Users</h1>
+          <h1 className="mt-[1px] yb-page-title">Users</h1>
         </div>
         <div className="flex-1" />
         <PrimaryButton onClick={() => setShowForm((s) => !s)}>
@@ -269,7 +291,7 @@ function UsersPage() {
                 {roles.map((role) => {
                   const capability = ROLE_CAPABILITIES[role];
                   return (
-                    <section key={role} className="border border-yb-line bg-white">
+                    <section key={role} className="yb-card border border-yb-line bg-white">
                       <div className="border-b border-yb-line bg-yb-table-head px-[11px] py-[8px]">
                         <div className="text-[13.5px] font-black text-yb-ink">{ROLE_LABELS[role]}</div>
                         <div className="mt-[2px] text-[11.5px] leading-[16px] text-yb-muted3">{capability.purpose}</div>
@@ -296,7 +318,11 @@ function UsersPage() {
             )}
           </div>
 
-          <section className="mt-[14px] border border-yb-line bg-white">
+          <div className="mt-[14px]">
+            <PermissionMatrix permissions={permissions} onChange={setPermissions} />
+          </div>
+
+          <section className="yb-card mt-[14px] border border-yb-line bg-white">
             <div className="border-b border-yb-line bg-yb-table-head px-[12px] py-[8px]">
               <div className="text-[11px] font-bold tracking-[1px] text-yb-panel-head-text">AVAILABILITY &amp; CAPACITY</div>
               <div className="mt-[2px] text-[11px] text-yb-muted3">These values are used immediately by request assignment and fallback routing.</div>

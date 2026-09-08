@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, Outlet, createFileRoute, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, Outlet, createFileRoute, redirect, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppHeader } from "../components/AppShell/AppHeader";
 import { FilterStrip, type FilterOption } from "../components/AppShell/FilterStrip";
@@ -10,8 +10,12 @@ import { useAuth } from "../lib/AuthContext";
 import { requestsApi, type TravelRequestRecord } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
 import { countdown } from "../lib/time";
+import { getStoredUser, hasPermission } from "../lib/session";
 
 export const Route = createFileRoute("/requests")({
+  beforeLoad: () => {
+    if (!hasPermission(getStoredUser(), "requests.read")) throw redirect({ to: "/" });
+  },
   component: RequestsPage,
 });
 
@@ -67,7 +71,7 @@ function liveRequestGroup(
 }
 
 function RequestsPage() {
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const params = useParams({ strict: false }) as { requestId?: string };
   const navigate = useNavigate();
   const [filter, setFilter] = useState(ALL_REQUESTS);
@@ -149,7 +153,7 @@ function RequestsPage() {
   if (params.requestId) return <Outlet />;
 
   return (
-    <div className="min-w-[1280px] bg-white text-yb-ink">
+    <div className="min-h-screen min-w-[1280px] bg-yb-canvas text-yb-ink">
       <AppHeader tabs={NAV_TABS} query={query} onQueryChange={setQuery} />
 
       <FilterStrip
@@ -170,7 +174,7 @@ function RequestsPage() {
         <div>
           <div className="text-[10.5px] font-bold tracking-[1.4px] text-yb-muted4">REQUESTS</div>
           <div className="flex items-baseline gap-[10px]">
-            <h1 className="mt-[1px] text-[26px] font-black tracking-[-0.2px]">{filter}</h1>
+            <h1 className="mt-[1px] yb-page-title">{filter}</h1>
             <span className="text-[13px] text-yb-muted3">
               {requestsQuery.isLoading
                 ? "Loading live requests…"
@@ -186,8 +190,8 @@ function RequestsPage() {
         </div>
         <div className="flex-1" />
         <div className="flex items-center gap-[10px]">
-          <PrimaryButton className="group/status-parent flex items-center gap-[7px]" aria-disabled="true">+ New Request <ImplementationStatusIcon label="Coming in Phase 2" description="Create requests from Inbox for now. Standalone request creation is not implemented yet." withinInteractiveControl /></PrimaryButton>
-          <SecondaryButton className="group/status-parent flex items-center gap-[7px]" aria-disabled="true">Assign… <ImplementationStatusIcon label="Not implemented here" description="Assignment is available from an individual request, not as a bulk action yet." withinInteractiveControl /></SecondaryButton>
+          {can("requests.create") && <PrimaryButton className="group/status-parent flex items-center gap-[7px]" aria-disabled="true">+ New Request <ImplementationStatusIcon label="Coming in Phase 2" description="Create requests from Inbox for now. Standalone request creation is not implemented yet." withinInteractiveControl /></PrimaryButton>}
+          {(can("requests.assign_self") || can("requests.assign_any")) && <SecondaryButton className="group/status-parent flex items-center gap-[7px]" aria-disabled="true">Assign… <ImplementationStatusIcon label="Not implemented here" description="Assignment is available from an individual request, not as a bulk action yet." withinInteractiveControl /></SecondaryButton>}
           <SecondaryButton className="group/status-parent flex items-center gap-[7px]" aria-disabled="true">Print <ImplementationStatusIcon label="Not implemented" description="Printing this queue is not available yet." withinInteractiveControl /></SecondaryButton>
           <SecondaryButton className="group/status-parent flex items-center gap-[7px]" aria-disabled="true">Export ▾ <ImplementationStatusIcon label="Not implemented" description="Request export is not available yet." withinInteractiveControl /></SecondaryButton>
         </div>

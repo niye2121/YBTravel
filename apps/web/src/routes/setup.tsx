@@ -1,18 +1,21 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { StaffPermission } from "@yb-travel/shared";
 import { AppHeader } from "../components/AppShell/AppHeader";
+import { useAuth } from "../lib/AuthContext";
 import { systemSettingsApi } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
-import { getStoredUser, hasAdminRole } from "../lib/session";
+import { getStoredUser, hasPermission } from "../lib/session";
 
 export const Route = createFileRoute("/setup")({
   beforeLoad: () => {
-    if (!hasAdminRole(getStoredUser())) throw redirect({ to: "/" });
+    if (!hasPermission(getStoredUser(), "settings.manage")) throw redirect({ to: "/" });
   },
   component: SetupOverviewPage,
 });
 
 type SetupCard = {
+  permission: StaffPermission;
   title: string;
   purpose: string;
   status: "Available" | "Needs decisions";
@@ -22,6 +25,7 @@ type SetupCard = {
 
 const SETUP_AREAS: SetupCard[] = [
   {
+    permission: "users.manage",
     title: "Users & Roles",
     purpose: "Control who can access the platform and which Phase 1 actions they may perform.",
     status: "Available",
@@ -29,6 +33,7 @@ const SETUP_AREAS: SetupCard[] = [
     includes: ["Offshore Intake Employee", "Travel Agent", "System Administrator", "Multiple roles per employee"],
   },
   {
+    permission: "settings.manage",
     title: "Booking Fees",
     purpose: "Maintain fee groups and passenger calculation rules without code changes.",
     status: "Available",
@@ -36,6 +41,7 @@ const SETUP_AREAS: SetupCard[] = [
     includes: ["Amount and currency", "Per passenger or per booking", "Adult, child, and infant rules", "Active/inactive groups"],
   },
   {
+    permission: "settings.manage",
     title: "Onboarding Workflow",
     purpose: "Define editable onboarding stages and the milestone task created by each stage.",
     status: "Available",
@@ -43,6 +49,7 @@ const SETUP_AREAS: SetupCard[] = [
     includes: ["Stage order and labels", "Completion stage", "Review completion gate", "Task role, priority, and expected duration"],
   },
   {
+    permission: "settings.manage",
     title: "Required Information",
     purpose: "Define which client, traveller, and request fields are mandatory and must be reviewed.",
     status: "Available",
@@ -50,6 +57,7 @@ const SETUP_AREAS: SetupCard[] = [
     includes: ["Legal names", "Dates of birth", "Airports", "Travel dates", "Optional request details"],
   },
   {
+    permission: "settings.manage",
     title: "Message Templates",
     purpose: "Approve copy-ready WhatsApp text by purpose and language.",
     status: "Available",
@@ -57,6 +65,7 @@ const SETUP_AREAS: SetupCard[] = [
     includes: ["Welcome", "Missing information", "Booking-fee explanation", "Follow-up", "Language and sensitive-data policy"],
   },
   {
+    permission: "settings.manage",
     title: "Request Workflow",
     purpose: "Configure request types, statuses, urgency levels, and deadline targets.",
     status: "Available",
@@ -64,6 +73,7 @@ const SETUP_AREAS: SetupCard[] = [
     includes: ["Five approved request types", "Eleven approved statuses", "Normal, High, and Urgent levels", "Response and service deadlines"],
   },
   {
+    permission: "settings.manage",
     title: "Assignment & Reminders",
     purpose: "Control representative availability, capacity, fallback, escalation, and reminder timing.",
     status: "Available",
@@ -71,6 +81,7 @@ const SETUP_AREAS: SetupCard[] = [
     includes: ["Preferred and secondary representative", "Available-team fallback", "Capacity limits", "Unanswered and missing-information reminders"],
   },
   {
+    permission: "whatsapp.manage_accounts",
     title: "WhatsApp Integration",
     purpose: "Connect and operate multiple independent WhatsApp numbers without losing stored conversations.",
     status: "Available",
@@ -78,6 +89,7 @@ const SETUP_AREAS: SetupCard[] = [
     includes: ["Preserved primary session", "Independent QR code per account", "Per-account Inbox routing", "Disconnect one account without affecting the others"],
   },
   {
+    permission: "integrations.manage",
     title: "AI Provider",
     purpose: "Connect the provider used for intake classification, information extraction, and response drafts.",
     status: "Available",
@@ -87,6 +99,7 @@ const SETUP_AREAS: SetupCard[] = [
 ];
 
 function SetupOverviewPage() {
+  const { can } = useAuth();
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({ queryKey: ["system-settings"], queryFn: systemSettingsApi.get });
   const demoDataMutation = useMutation({
@@ -105,9 +118,10 @@ function SetupOverviewPage() {
   });
   const demoDataEnabled = settingsQuery.data?.demoDataEnabled ?? false;
   const testDataDeletionEnabled = settingsQuery.data?.testDataDeletionEnabled ?? false;
+  const visibleAreas = SETUP_AREAS.filter((area) => can(area.permission));
 
   return (
-    <div className="min-w-[1280px] bg-white text-yb-ink">
+    <div className="min-h-screen min-w-[1280px] bg-yb-canvas text-yb-ink">
       <AppHeader tabs={NAV_TABS} />
 
       <div className="flex items-center gap-[14px] px-[22px] pt-[16px] pb-[14px]">
@@ -116,7 +130,7 @@ function SetupOverviewPage() {
         </div>
         <div>
           <div className="text-[10.5px] font-bold tracking-[1.4px] text-yb-muted4">SYSTEM ADMINISTRATION</div>
-          <h1 className="mt-[1px] text-[26px] font-black tracking-[-0.2px]">Phase 1 Setup</h1>
+          <h1 className="mt-[1px] yb-page-title">Phase 1 Setup</h1>
           <p className="mt-[3px] text-[13px] text-yb-muted3">
             Business-controlled rules used by client intake, onboarding, assignments, and WhatsApp work.
           </p>
@@ -124,11 +138,11 @@ function SetupOverviewPage() {
       </div>
 
       <div className="mx-[22px] mb-[14px] border border-yb-line bg-yb-panel-head px-[14px] py-[11px] text-[13px] text-yb-ink2">
-        <span className="font-bold text-yb-green">9 areas are configurable now.</span>{" "}
+        <span className="font-bold text-yb-green">{visibleAreas.length} areas are available to you.</span>{" "}
         The other areas are listed here so the Setup structure is complete, but remain locked until their business rules are approved.
       </div>
 
-      <section className="mx-[22px] mb-[14px] border border-yb-line border-t-[3px] border-t-yb-green bg-white">
+      <section className="yb-card mx-[22px] mb-[14px] border border-yb-line border-t-[3px] border-t-yb-green bg-white">
         <div className="flex items-center gap-[18px] px-[16px] py-[13px]">
           <div className="flex-1">
             <div className="mb-[3px] text-[10px] font-bold tracking-[1.2px] text-yb-muted2">DEMO DATA</div>
@@ -156,7 +170,7 @@ function SetupOverviewPage() {
         )}
       </section>
 
-      <section className="mx-[22px] mb-[14px] border border-yb-red border-t-[3px] border-t-yb-red bg-white">
+      <section className="yb-card mx-[22px] mb-[14px] border border-yb-red border-t-[3px] border-t-yb-red bg-white">
         <div className="flex items-center gap-[18px] px-[16px] py-[13px]">
           <div className="flex-1">
             <div className="mb-[3px] text-[10px] font-bold tracking-[1.2px] text-yb-red">DESTRUCTIVE TEST TOOL</div>
@@ -185,7 +199,7 @@ function SetupOverviewPage() {
       </section>
 
       <div className="mx-[22px] mb-[26px] grid grid-cols-4 gap-[12px]">
-        {SETUP_AREAS.map((area) => {
+        {visibleAreas.map((area) => {
           const content = (
             <>
               <div className="flex items-start justify-between gap-[10px]">

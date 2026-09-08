@@ -40,7 +40,7 @@ function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-yb-panel-head">
       <form
         onSubmit={handleSubmit}
-        className="w-[340px] rounded-yb border border-yb-line bg-white p-[28px] shadow-sm"
+        className="yb-card w-[340px] rounded-yb border border-yb-line bg-white p-[28px] shadow-sm"
       >
         <div className="mb-[18px] flex items-center gap-[10px]">
           <div className="flex h-[26px] w-[26px] items-center justify-center rounded-yb-tile bg-yb-gold text-[12px] font-black tracking-[0.5px] text-yb-green">

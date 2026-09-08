@@ -1,78 +1,29 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, Outlet, createFileRoute, redirect, useRouterState } from "@tanstack/react-router";
 import { AppHeader } from "../components/AppShell/AppHeader";
-import { Panel } from "../components/AppShell/Panel";
-import { ImplementationStatusIcon } from "../components/ImplementationStatusIcon";
-import { AGENT_WORKLOAD, CONVERSION, REVENUE, TICKETING_RISK } from "../data/reportsData";
+import { useAuth } from "../lib/AuthContext";
 import { NAV_TABS } from "../lib/navTabs";
+import { getStoredUser, hasPermission } from "../lib/session";
 
 export const Route = createFileRoute("/reports")({
+  beforeLoad: () => {
+    if (!hasPermission(getStoredUser(), "workloads.manage")) throw redirect({ to: "/" });
+  },
   component: ReportsPage,
 });
 
-const maxOpen = Math.max(...AGENT_WORKLOAD.map((a) => a.open));
-
+/**
+ * Lists reports as records rather than presenting speculative dashboard cards.
+ * The Agent Workload report is live; later-phase reports stay clearly labelled.
+ */
 function ReportsPage() {
-  return (
-    <div className="min-w-[1280px] bg-[#f7f7f2] text-yb-ink">
-      <AppHeader tabs={NAV_TABS} />
-
-      {/* No filter strip and no table here on purpose — Reports is
-          aggregate metrics (P8-08..13, Phase 8, "Future"), not a workflow
-          queue, and this is deliberately the lightest of the five new
-          pages rather than over-building speculative analytics. */}
-      <div className="flex items-center gap-[14px] border-b border-yb-line-head bg-white px-[22px] pt-[16px] pb-[14px]">
-        <div className="flex h-[30px] w-[30px] items-center justify-center rounded-yb-tile bg-yb-green">
-          <div className="h-[13px] w-[13px] rounded-[1px] border-2 border-yb-gold" />
-        </div>
-        <div>
-          <div className="text-[10.5px] font-bold tracking-[1.4px] text-yb-muted4">REPORTS</div>
-          <div className="flex items-baseline gap-[10px]">
-            <h1 className="mt-[1px] text-[26px] font-black tracking-[-0.2px]">Management Visibility</h1>
-            <span className="flex items-center gap-[7px] text-[13px] text-yb-muted3">summary figures, not live analytics yet <ImplementationStatusIcon label="Coming in Phase 8" description="These are demonstration figures. Live reporting is not implemented yet." /></span>
-          </div>
-        </div>
-      </div>
-
-      <div className="px-[22px] pt-4 pb-[26px]">
-        <div className="grid grid-cols-3 gap-4">
-          <Panel title="INQUIRY → BOOKING CONVERSION" pad>
-            <div className="text-[36px] font-black leading-none text-yb-green">{CONVERSION.rate}</div>
-            <div className="mt-2 text-[13px] text-yb-muted3">{CONVERSION.detail}</div>
-          </Panel>
-
-          <Panel title="BOOKING-FEE REVENUE" pad>
-            <div className="text-[36px] font-black leading-none text-yb-green">{REVENUE.total}</div>
-            <div className="mt-2 text-[13px] text-yb-muted3">{REVENUE.detail}</div>
-          </Panel>
-
-          <Panel title="TICKETING DEADLINE RISK" pad>
-            <div className="text-[36px] font-black leading-none text-yb-red">{TICKETING_RISK.count}</div>
-            <div className="mt-2 text-[13px] text-yb-muted3">{TICKETING_RISK.detail}</div>
-          </Panel>
-        </div>
-
-        <div className="mt-4">
-          <Panel title="AGENT WORKLOAD" right="open requests by agent">
-            {AGENT_WORKLOAD.map((a, i) => (
-              <div
-                key={a.agent}
-                className={`flex items-center gap-[10px] px-[14px] py-2 text-[13.5px] ${
-                  i < AGENT_WORKLOAD.length - 1 ? "border-b border-yb-line-row" : ""
-                }`}
-              >
-                <span className="w-[130px] text-yb-ink2">{a.agent}</span>
-                <span className="h-[10px] flex-1 rounded-[1px] bg-yb-line-row">
-                  <span
-                    className="block h-[10px] rounded-[1px] bg-yb-green"
-                    style={{ width: `${(a.open / maxOpen) * 100}%` }}
-                  />
-                </span>
-                <span className="w-5 text-right font-bold tabular-nums">{a.open}</span>
-              </div>
-            ))}
-          </Panel>
-        </div>
-      </div>
-    </div>
-  );
+  const { can } = useAuth();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  if (pathname !== "/reports") return <Outlet />;
+  const reports = [
+    { name: "Agent Workload", question: "Who is carrying what right now?", live: can("workloads.manage"), to: "/reports/agent-workload" as const },
+    { name: "Conversion", question: "How many requests became bookings?", live: false, to: null },
+    { name: "Booking Fees", question: "What did each pricing group generate?", live: false, to: null },
+    { name: "Deadline Risk", question: "What is about to be missed?", live: false, to: null },
+  ];
+  return <div className="min-h-screen min-w-[1300px] bg-yb-canvas text-yb-ink"><AppHeader tabs={NAV_TABS} compact /><main className="px-[16px] pt-[14px] pb-[36px]"><header className="mb-[12px]"><div className="text-[10px] uppercase tracking-[1.4px] text-yb-muted3">Reports</div><h1 className="yb-page-title">Management reports</h1></header><section className="border-2 border-yb-line bg-white"><div className="flex h-[32px] items-center border-b border-yb-line bg-yb-panel-head px-[14px]"><div className="text-[10.5px] font-bold tracking-[1px] text-yb-panel-head-text">AVAILABLE REPORTS</div></div><table className="w-full table-fixed border-collapse text-[12px]"><thead><tr className="h-[30px] bg-yb-table-head text-yb-muted"><th className="px-[12px] text-left">Report</th><th className="text-left">What it answers</th><th className="px-[12px] text-left">Availability</th></tr></thead><tbody>{reports.map((report) => <tr key={report.name} className="h-[44px] border-t border-yb-line-row"><td className="px-[12px] font-bold">{report.live && report.to ? <Link to={report.to} className="text-yb-green underline">{report.name}</Link> : report.name}</td><td>{report.question}</td><td className="px-[12px]">{report.live ? <span className="font-bold text-yb-green">Live</span> : <span className="text-yb-muted3">Later phase</span>}</td></tr>)}</tbody></table></section></main></div>;
 }

@@ -1,7 +1,8 @@
 import { BadRequestException, Body, Controller, Get, Post, Put, Query, Req, UseGuards } from "@nestjs/common";
 import { z, ZodError } from "zod";
-import { AdminGuard } from "../auth/admin.guard";
 import { AuthGuard, type AuthenticatedRequest } from "../auth/auth.guard";
+import { AllowedPermissions } from "../auth/allowed-permissions.decorator";
+import { PermissionGuard } from "../auth/permission.guard";
 import {
   AiProviderSettingsService,
   type AiProviderInput,
@@ -31,7 +32,8 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 }
 
 @Controller("ai-provider-settings")
-@UseGuards(AuthGuard, AdminGuard)
+@UseGuards(AuthGuard, PermissionGuard)
+@AllowedPermissions("integrations.manage")
 export class AiProviderSettingsController {
   constructor(
     private readonly service: AiProviderSettingsService,

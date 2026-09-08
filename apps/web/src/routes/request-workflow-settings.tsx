@@ -5,10 +5,10 @@ import { AppHeader } from "../components/AppShell/AppHeader";
 import { PrimaryButton, SecondaryButton } from "../components/AppShell/buttons";
 import { requestWorkflowSettingsApi, type RequestSetting, type RequestSettingInput, type UrgencyLevel, type UrgencyLevelInput } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
-import { getStoredUser, hasAdminRole } from "../lib/session";
+import { getStoredUser, hasPermission } from "../lib/session";
 
 export const Route = createFileRoute("/request-workflow-settings")({
-  beforeLoad: () => { if (!hasAdminRole(getStoredUser())) throw redirect({ to: "/" }); },
+  beforeLoad: () => { if (!hasPermission(getStoredUser(), "settings.manage")) throw redirect({ to: "/" }); },
   component: RequestWorkflowSettingsPage,
 });
 
@@ -70,11 +70,11 @@ function RequestWorkflowSettingsPage() {
   const statuses = settingsQuery.data?.requestStatuses ?? [];
   const urgencies = settingsQuery.data?.urgencyLevels ?? [];
   return (
-    <div className="min-w-[1280px] bg-white text-yb-ink">
+    <div className="min-h-screen min-w-[1280px] bg-yb-canvas text-yb-ink">
       <AppHeader tabs={NAV_TABS} />
       <div className="flex items-center gap-[14px] px-[22px] pt-[16px] pb-[14px]">
         <div className="flex h-[30px] w-[30px] items-center justify-center rounded-yb-tile bg-yb-green"><div className="h-[13px] w-[13px] rounded-[1px] border-2 border-yb-gold" /></div>
-        <div><div className="text-[10.5px] font-bold tracking-[1.4px] text-yb-muted4">SETUP</div><h1 className="mt-[1px] text-[26px] font-black">Request Workflow</h1><p className="mt-[3px] text-[13px] text-yb-muted3">Manage request types, statuses, urgency levels, and their response and service deadlines.</p></div>
+        <div><div className="text-[10.5px] font-bold tracking-[1.4px] text-yb-muted4">SETUP</div><h1 className="mt-[1px] yb-page-title">Request Workflow</h1><p className="mt-[3px] text-[13px] text-yb-muted3">Manage request types, statuses, urgency levels, and their response and service deadlines.</p></div>
       </div>
 
       {urgencyFormOpen && <form onSubmit={submitUrgency} className="mx-[22px] mb-[16px] border border-yb-line bg-yb-panel-head p-[14px]">

@@ -1,7 +1,8 @@
 import { BadRequestException, Body, Controller, Get, Put, Req, UseGuards } from "@nestjs/common";
 import { z, ZodError } from "zod";
-import { AdminGuard } from "../auth/admin.guard";
 import { AuthGuard, type AuthenticatedRequest } from "../auth/auth.guard";
+import { AllowedPermissions } from "../auth/allowed-permissions.decorator";
+import { PermissionGuard } from "../auth/permission.guard";
 import { AssignmentRoutingService } from "./assignment-routing.service";
 
 const roleSchema = z.enum(["offshore_intake_employee", "travel_agent", "supervisor_manager", "ticketing_agent", "finance_user", "system_administrator"]);
@@ -24,7 +25,8 @@ const updateSchema = z.object({
 });
 
 @Controller("assignment-settings")
-@UseGuards(AuthGuard, AdminGuard)
+@UseGuards(AuthGuard, PermissionGuard)
+@AllowedPermissions("settings.manage")
 export class AssignmentRoutingController {
   constructor(private readonly routing: AssignmentRoutingService) {}
   @Get() get() { return this.routing.getSettings(); }

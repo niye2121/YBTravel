@@ -1,6 +1,6 @@
 # Phase 1 Completion Checklist
 
-Status date: 2026-09-03
+Status date: 2026-09-08
 
 Source of truth: `docs/03-deliverables.md`, Phase 1 (P1-01 through P1-21).
 
@@ -25,15 +25,15 @@ Status meanings:
 | P1-09 | Use approved, copy-ready WhatsApp templates | **Complete** | The Inbox lists active approved templates by purpose/language, renders supported variables from the linked client/request/fee/completeness context, warns about unresolved values, and copies the result into the editable composer without sending automatically. Administrator edits reject unsupported variables. |
 | P1-10 | Preferred rep, secondary rep, and available-team fallback | **Complete** | Clients store both representatives; assignment routing supports availability, capacity, continuity, fallback, escalation, and staff confirmation/automatic modes. |
 | P1-11 | Store notes, documents, and communication history with the correct client/request | **Complete** | Client and request profiles store scoped internal notes and PDF/JPEG/PNG documents, validate size/signature, require operational roles, audit metadata without file contents, log authenticated downloads as sensitive access, and show a unified history with linked WhatsApp text/voice-note activity. |
-| P1-12 | Reminders for unanswered inquiries, missing information, and next actions | **Partial** | Assignment notifications and timing configuration exist. A durable reminder/job engine, reminder records, due-state calculation, escalation, acknowledgement, and UI queue are still required. |
-| P1-13 | Offshore Intake Employee role and permissions | **Partial** | Role vocabulary exists and is assignable, but client/traveller endpoints currently allow any authenticated user instead of enforcing the role's allowed actions. |
-| P1-14 | Travel Agent role and permissions | **Partial** | Role vocabulary exists and is assignable. Phase 1 request/client permissions need explicit enforcement; Phase 2 booking capabilities must remain outside this checklist. |
-| P1-15 | Supervisor / Manager role and permissions | **Missing** | Role vocabulary exists but the role is excluded from new-user assignment and lacks workload/reassignment/exception permission enforcement. Phase 1 must implement the role's management permissions; later-phase approvals remain gated. |
-| P1-16 | Ticketing Agent role and permissions | **Missing** | Role vocabulary exists but the role is excluded from new-user assignment. Phase 1 must establish the role and explicit permission boundary; actual ticket operations remain Phase 3/5. |
-| P1-17 | Finance User role and permissions | **Missing** | Role vocabulary exists but the role is excluded from new-user assignment. Phase 1 must establish the role and explicit permission boundary; invoices/payments/refunds remain later-phase work. |
-| P1-18 | System Administrator role for users, settings, integrations, and access history | **Partial** | Admin-only user/settings/integration controls exist. A usable access-history review and complete permission boundary are still required. |
-| P1-19 | Show and allow only actions permitted by assigned role(s) | **Missing** | Authentication and a few administrator/role guards exist, but there is no central fine-grained permission catalogue applied consistently to API endpoints and UI actions. |
-| P1-20 | Allow multiple roles while assigning high-risk permissions explicitly | **Partial** | Multiple roles are stored and combined. Only three roles are currently assignable, and there is no explicit high-risk permission grant model. |
+| P1-12 | Reminders for unanswered inquiries, missing information, and next actions | **Complete locally** | Durable reminders are synchronized from request response/service deadlines, waiting-for-information work, and onboarding tasks. The retry-safe processor calculates upcoming, due, overdue, and escalated states; delivers idempotent in-app alerts; recovers stale processing locks with backoff; resolves completed sources; and supports acknowledgement, reassignment, team/personal views, and a dedicated queue. Covered by `test:reminders`. |
+| P1-13 | Offshore Intake Employee role and permissions | **Complete locally** | The approved role supplies explicit intake defaults, every matching Phase 1 endpoint is database-permission guarded, and administrators can grant or revoke each implemented permission per employee. |
+| P1-14 | Travel Agent role and permissions | **Complete locally** | The approved role now includes the Phase 1 client, traveller, onboarding, WhatsApp, request, fee, template, and record permissions. Travel Agents can see the open queue and claim unassigned work, but backend ownership checks restrict request edits, information review, fee calculation, and request-specific notes/documents/history to their assigned requests. Assign-any staff retain cross-queue authority; later-phase ticketing authority is not inherited. |
+| P1-15 | Supervisor / Manager role, workload management, retrospective review, and reporting | **Complete locally** | Supervisor / Manager is the fourth assignable Phase 1 role. It inherits operational work, adds cross-team workload and reassignment authority, receives an append-only after-the-fact review queue for assignment, pricing, markup, waiver, and operational exceptions, and can open the live Agent Workload report. Reviews never block an agent action, preserving Rule 23. Covered by `test:supervisor`. |
+| P1-16 | Ticketing authority folded into approved roles | **Complete for Phase 1 boundary** | Ticketing is not a separate assignable role. Issue/reissue/void/exchange permissions are catalogued and backend-recognized as unavailable, so they cannot be granted before the later ticketing workflows exist. |
+| P1-17 | Finance authority folded into approved roles | **Complete for Phase 1 boundary** | Finance is not a separate assignable role. Invoice/payment/credit/refund/reconciliation permissions are catalogued and backend-recognized as unavailable until the later finance workflows exist. |
+| P1-18 | System Administrator role for users, settings, integrations, and access history | **Complete locally** | Administrators have a permission-protected, system-wide history combining mutations and sensitive access. It supports search, user/action/Brooklyn-date filters, important-activity review, pagination, redacted before/after field changes, and direct Setup navigation. Covered by `test:audit-history`. |
+| P1-19 | Show and allow only actions permitted by assigned role(s) | **Complete locally** | Primary and Inbox navigation, Setup links, notifications, live Phase 1 route entry, page queries, and create/edit/review/send/assignment controls now follow the employee's effective permissions. Client-, traveller-, request-, reminder-, report-, and WhatsApp-route guards block direct URL access. A restricted-user browser test confirms read-only Clients access hides creation and granular profile controls while unrelated routes redirect safely. `test:permissions` also proves traveller creation cannot bypass the separate link permission. |
+| P1-20 | Allow multiple roles while assigning high-risk permissions explicitly | **Complete locally** | Multiple approved roles combine their defaults; normalized per-user grants/revocations persist in PostgreSQL, sensitive capabilities are labeled, changes are audited, and existing sessions take changes on their next request. |
 | P1-21 | Show all open client requests and current status in one place | **Complete** | The Requests queue includes persisted requests, status, assignment, search, and detail navigation. Demo rows must stay visibly separated and removable for final acceptance. |
 
 ## Completion order
@@ -57,15 +57,15 @@ Work is completed in this order because later items depend on the earlier domain
 5. **Completed locally: notes, documents, and history — P1-11**
    - Scoped notes, authenticated document storage/download, integrity metadata, sensitive-access logging, and unified WhatsApp/record history are implemented. Replacement/deletion is intentionally not offered in Phase 1, avoiding accidental loss of client records.
 
-6. **Finish durable reminders — P1-12**
-   - Persist reminders for unanswered inquiries, missing information, milestone work, and next actions.
-   - Add due/overdue/escalated states, acknowledgement, assignment, notification delivery, and retry-safe processing.
+6. **Completed locally: durable reminders — P1-12**
+   - Reminder records, source synchronization, deadline states, acknowledgement, assignment, notification delivery, stale-lock recovery, exponential retry, and the staff queue are implemented.
+   - Successful request-linked WhatsApp replies resolve unanswered-inquiry sources automatically.
 
-7. **Finish roles and permissions — P1-13 through P1-20**
-   - Make all six roles assignable.
-   - Introduce a central permission catalogue and database-checked authorization guard.
-   - Apply it to every Phase 1 API mutation/read and mirror it in the UI.
-   - Add explicit grants for high-risk permissions and an administrator access-history screen.
+7. **Completed locally: roles and permissions — P1-13 through P1-20**
+   - Completed locally: three approved role templates, individual database grants/revocations, central API enforcement, sensitive permission labeling, and permission-aware setup/WhatsApp/assignment controls.
+   - Completed locally: Supervisor / Manager is assignable with live workload management, retrospective exception review, and the Agent Workload report.
+   - Completed locally: administrators can search and inspect system-wide mutation and protected-access history with redacted before/after details.
+   - Completed locally: permission-aware navigation, direct routes, data queries, and page actions now mirror the API permission boundaries; restricted-user browser acceptance and API integration coverage passed.
 
 8. **Final Phase 1 release gate**
    - Run migrations twice to prove idempotency.

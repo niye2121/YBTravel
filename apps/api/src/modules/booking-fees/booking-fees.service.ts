@@ -1,4 +1,5 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import type { StaffPermission } from "@yb-travel/shared";
 import type { Pool } from "pg";
 import { PG_POOL } from "../../database/database.module";
 import { recordAudit } from "../../database/audit";
@@ -255,9 +256,22 @@ export class BookingFeesService {
     };
   }
 
-  async saveRequestFee(requestId: number, passengers: Array<{ travellerId: number; category: PassengerCategory }>, actorUserId: number): Promise<RequestBookingFee> {
+  async saveRequestFee(
+    requestId: number,
+    passengers: Array<{ travellerId: number; category: PassengerCategory }>,
+    actorUserId: number,
+    actorPermissions: readonly StaffPermission[],
+  ): Promise<RequestBookingFee> {
     if (passengers.length === 0) throw new BadRequestException("Select at least one traveller");
     if (new Set(passengers.map((item) => item.travellerId)).size !== passengers.length) throw new BadRequestException("A traveller can be selected only once");
+    const ownership = await this.pool.query<{ assigned_user_id: number | null }>(
+      "SELECT assigned_user_id FROM travel_requests WHERE id = $1",
+      [requestId],
+    );
+    if (!ownership.rows[0]) throw new NotFoundException("Travel request not found");
+    if (!actorPermissions.includes("requests.assign_any") && ownership.rows[0].assigned_user_id !== actorUserId) {
+      throw new ForbiddenException("You can calculate fees only for requests assigned to you");
+    }
     const context = await this.requestContext(requestId);
     const available = new Map(context.travellers.map((item) => [item.id, item]));
     for (const passenger of passengers) if (!available.has(passenger.travellerId)) throw new BadRequestException("Every selected traveller must belong to this client");

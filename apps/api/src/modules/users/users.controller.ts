@@ -13,12 +13,13 @@ import {
 import { z, ZodError } from "zod";
 import type { EmployeeDetail, EmployeeSummary } from "@yb-travel/shared";
 import { AuthGuard, type AuthenticatedRequest } from "../auth/auth.guard";
-import { AdminGuard } from "../auth/admin.guard";
+import { PermissionGuard } from "../auth/permission.guard";
+import { AllowedPermissions } from "../auth/allowed-permissions.decorator";
 import { UsersService } from "./users.service";
 
 /**
  * Defined locally rather than imported from @yb-travel/shared — see the
- * comment in auth.controller.ts. New assignments are limited to the three
+ * comment in auth.controller.ts. New assignments are limited to the four
  * approved Phase 1 launch roles; historical role values remain readable.
  */
 const staffProfileSchema = z.object({
@@ -42,10 +43,21 @@ const identitySchema = z.object({
       z.enum([
         "offshore_intake_employee",
         "travel_agent",
+        "supervisor_manager",
         "system_administrator",
       ]),
     )
     .min(1, "Select at least one role"),
+  permissions: z.array(z.enum([
+    "whatsapp.read", "whatsapp.send", "whatsapp.manage_accounts", "whatsapp.create_groups",
+    "clients.read", "clients.create", "clients.update", "travellers.read", "travellers.create", "travellers.link",
+    "onboarding.read", "onboarding.manage", "requests.read", "requests.create", "requests.update",
+    "requests.assign_self", "requests.assign_any", "fees.read", "fees.calculate", "templates.read", "templates.use",
+    "records.read", "records.write", "notifications.read", "users.manage", "settings.manage", "integrations.manage",
+    "audit.read", "test_data.delete", "workloads.manage", "exceptions.approve", "ticketing.issue", "ticketing.reissue",
+    "ticketing.void", "ticketing.exchange", "finance.invoices", "finance.payments", "finance.credits", "finance.refunds",
+    "finance.reconciliation",
+  ])),
 });
 
 const createUserSchema = identitySchema.extend({
@@ -55,12 +67,13 @@ const createUserSchema = identitySchema.extend({
 const updateEmployeeSchema = identitySchema.merge(staffProfileSchema);
 
 /**
- * Every route here requires a logged-in System Administrator — P1-18 in
- * docs/03-deliverables.md. AuthGuard must run before AdminGuard so
- * req.user is populated by the time AdminGuard checks the role.
+ * Every route here requires the database-derived users.manage permission.
+ * AuthGuard runs first so PermissionGuard receives the current user rather
+ * than trusting a role or permission copied into the JWT.
  */
 @Controller("users")
-@UseGuards(AuthGuard, AdminGuard)
+@UseGuards(AuthGuard, PermissionGuard)
+@AllowedPermissions("users.manage")
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 

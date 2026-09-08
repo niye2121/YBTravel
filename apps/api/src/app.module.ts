@@ -16,6 +16,9 @@ import { MessageTemplatesModule } from "./modules/message-templates/message-temp
 import { DatabaseModule } from "./database/database.module";
 import { HealthModule } from "./health/health.module";
 import { EntityRecordsModule } from "./modules/entity-records/entity-records.module";
+import { RemindersModule } from "./modules/reminders/reminders.module";
+import { SupervisorModule } from "./modules/supervisor/supervisor.module";
+import { AuditHistoryModule } from "./modules/audit-history/audit-history.module";
 
 @Module({
   imports: [
@@ -36,6 +39,9 @@ import { EntityRecordsModule } from "./modules/entity-records/entity-records.mod
     NotificationsModule,
     MessageTemplatesModule,
     EntityRecordsModule,
+    RemindersModule,
+    SupervisorModule,
+    AuditHistoryModule,
   ],
 })
 export class AppModule {}

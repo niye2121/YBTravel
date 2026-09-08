@@ -8,8 +8,10 @@ import type {
   EmployeeSummary,
   StaffAvailability,
   StaffRole,
+  StaffPermission,
   UpdateEmployeeInput,
 } from "@yb-travel/shared";
+import { backendEffectivePermissions, backendPermissionsForRoles, IMPLEMENTED_PERMISSIONS } from "../auth/permissions";
 import { recordAudit } from "../../database/audit";
 import { PG_POOL } from "../../database/database.module";
 
@@ -31,6 +33,7 @@ type EmployeeRow = {
   open_request_count: number;
   last_assigned_at: string | null;
   created_at: string;
+  permission_overrides: Array<{ permission: StaffPermission; granted: boolean }>;
 };
 
 const employeeSelect = `
@@ -47,6 +50,8 @@ const employeeSelect = `
           JOIN request_statuses rs ON rs.id = r.request_status_id
           WHERE r.assigned_user_id = u.id AND rs.code NOT IN ('completed', 'cancelled')) AS open_request_count,
          (SELECT MAX(e.created_at) FROM request_assignment_events e WHERE e.staff_user_id = u.id) AS last_assigned_at,
+         COALESCE((SELECT jsonb_agg(jsonb_build_object('permission', o.permission_code, 'granted', o.granted))
+                   FROM user_permission_overrides o WHERE o.user_id = u.id), '[]'::jsonb) AS permission_overrides,
          u.created_at
   FROM users u
   LEFT JOIN staff_routing_profiles p ON p.user_id = u.id`;
@@ -58,6 +63,7 @@ function toSummary(row: EmployeeRow): EmployeeSummary {
     email: row.email,
     phoneNumber: row.phone_number,
     roles: row.roles as StaffRole[],
+    permissions: backendEffectivePermissions(row.roles as StaffRole[], row.permission_overrides),
     active: row.active,
     availabilityStatus: row.availability_status,
     capacityLimit: row.capacity_limit,
@@ -76,6 +82,41 @@ function toSummary(row: EmployeeRow): EmployeeSummary {
 @Injectable()
 export class UsersService {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
+
+  /**
+   * Rejects unknown future capability activation at the service boundary even
+   * if a caller bypasses the browser's disabled checkboxes.
+   */
+  private assertImplementedPermissions(permissions: readonly StaffPermission[]): void {
+    const implemented = new Set(IMPLEMENTED_PERMISSIONS);
+    const unavailable = permissions.filter((permission) => !implemented.has(permission));
+    if (unavailable.length) throw new BadRequestException(`These permissions are not implemented yet: ${unavailable.join(", ")}`);
+  }
+
+  /**
+   * Stores only differences from role defaults. This keeps roles useful as
+   * templates while preserving every administrator checkbox choice exactly.
+   */
+  private async replacePermissionOverrides(
+    client: PoolClient,
+    userId: number,
+    roles: readonly StaffRole[],
+    permissions: readonly StaffPermission[],
+    actorUserId: number,
+  ): Promise<void> {
+    this.assertImplementedPermissions(permissions);
+    const desired = new Set(permissions);
+    const defaults = new Set(backendPermissionsForRoles(roles));
+    await client.query("DELETE FROM user_permission_overrides WHERE user_id = $1", [userId]);
+    for (const permission of IMPLEMENTED_PERMISSIONS) {
+      if (desired.has(permission) === defaults.has(permission)) continue;
+      await client.query(
+        `INSERT INTO user_permission_overrides (user_id, permission_code, granted, changed_by)
+         VALUES ($1, $2, $3, $4)`,
+        [userId, permission, desired.has(permission), actorUserId],
+      );
+    }
+  }
 
   private async validateRequestTypes(db: Pool | PoolClient, requestTypeIds: number[]): Promise<void> {
     if (requestTypeIds.length === 0) return;
@@ -175,6 +216,8 @@ export class UsersService {
       const id = userResult.rows[0]?.id;
       if (!id) throw new Error("Failed to create employee");
 
+      await this.replacePermissionOverrides(client, id, input.roles, input.permissions, actorUserId);
+
       await client.query(
         `INSERT INTO staff_routing_profiles
            (user_id, availability_status, capacity_limit, high_priority_capacity_limit,
@@ -190,7 +233,7 @@ export class UsersService {
         capacityLimit: input.capacityLimit, highPriorityCapacityLimit: input.highPriorityCapacityLimit,
         timezone: input.timezone, workdays: input.workdays,
         workdayStart: input.workdayStart, workdayEnd: input.workdayEnd,
-        eligibleRequestTypeIds: input.eligibleRequestTypeIds,
+        eligibleRequestTypeIds: input.eligibleRequestTypeIds, permissions: input.permissions,
       };
       await recordAudit(client, actorUserId, "employee.created", "user", id, null, after);
       await client.query("COMMIT");
@@ -204,8 +247,8 @@ export class UsersService {
   }
 
   async update(id: number, input: UpdateEmployeeInput, actorUserId: number): Promise<EmployeeDetail> {
-    if (id === actorUserId && (!input.active || !input.roles.includes("system_administrator"))) {
-      throw new BadRequestException("You cannot deactivate your own account or remove your administrator role");
+    if (id === actorUserId && (!input.active || !input.permissions.includes("users.manage"))) {
+      throw new BadRequestException("You cannot deactivate your own account or remove your user-management permission");
     }
     const client = await this.pool.connect();
     try {
@@ -230,6 +273,7 @@ export class UsersService {
         "UPDATE users SET name = $2, email = lower($3), phone_number = $4, roles = $5, active = $6 WHERE id = $1",
         [id, input.name.trim(), input.email.trim(), input.phoneNumber, input.roles, input.active],
       );
+      await this.replacePermissionOverrides(client, id, input.roles, input.permissions, actorUserId);
       await client.query(
         `INSERT INTO staff_routing_profiles
            (user_id, availability_status, capacity_limit, high_priority_capacity_limit,

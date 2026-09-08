@@ -41,7 +41,7 @@ function BookingsPage() {
   }, [filter, query]);
 
   return (
-    <div className="min-w-[1280px] bg-white text-yb-ink">
+    <div className="min-h-screen min-w-[1280px] bg-yb-canvas text-yb-ink">
       <AppHeader tabs={NAV_TABS} query={query} onQueryChange={setQuery} />
 
       <FilterStrip filters={BOOKING_FILTERS} active={filter} onChange={setFilter} />
@@ -53,7 +53,7 @@ function BookingsPage() {
         <div>
           <div className="text-[10.5px] font-bold tracking-[1.4px] text-yb-muted4">BOOKINGS</div>
           <div className="flex items-baseline gap-[10px]">
-            <h1 className="mt-[1px] text-[26px] font-black tracking-[-0.2px]">{filter}</h1>
+            <h1 className="mt-[1px] yb-page-title">{filter}</h1>
             <span className="text-[13px] text-yb-muted3">{BOOKINGS.length} total</span>
           </div>
         </div>

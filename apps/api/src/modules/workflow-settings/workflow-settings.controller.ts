@@ -11,8 +11,9 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { z, ZodError } from "zod";
-import { AdminGuard } from "../auth/admin.guard";
 import { AuthGuard, type AuthenticatedRequest } from "../auth/auth.guard";
+import { AllowedPermissions } from "../auth/allowed-permissions.decorator";
+import { PermissionGuard } from "../auth/permission.guard";
 import {
   WorkflowSettingsService,
   type OnboardingStage,
@@ -91,23 +92,24 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 }
 
 @Controller("workflow-settings")
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, PermissionGuard)
 export class WorkflowSettingsController {
   constructor(private readonly service: WorkflowSettingsService) {}
 
   @Get()
+  @AllowedPermissions("onboarding.read")
   listActive(): Promise<WorkflowSettings> {
     return this.service.get(true);
   }
 
   @Get("admin")
-  @UseGuards(AdminGuard)
+  @AllowedPermissions("settings.manage")
   listAll(): Promise<WorkflowSettings> {
     return this.service.get(false);
   }
 
   @Post("stages")
-  @UseGuards(AdminGuard)
+  @AllowedPermissions("settings.manage")
   createStage(
     @Req() request: AuthenticatedRequest,
     @Body() body: unknown,
@@ -116,7 +118,7 @@ export class WorkflowSettingsController {
   }
 
   @Patch("stages/:id")
-  @UseGuards(AdminGuard)
+  @AllowedPermissions("settings.manage")
   updateStage(
     @Param("id", ParseIntPipe) id: number,
     @Req() request: AuthenticatedRequest,
@@ -126,7 +128,7 @@ export class WorkflowSettingsController {
   }
 
   @Post("required-fields")
-  @UseGuards(AdminGuard)
+  @AllowedPermissions("settings.manage")
   createField(
     @Req() request: AuthenticatedRequest,
     @Body() body: unknown,
@@ -138,7 +140,7 @@ export class WorkflowSettingsController {
   }
 
   @Patch("required-fields/:id")
-  @UseGuards(AdminGuard)
+  @AllowedPermissions("settings.manage")
   updateField(
     @Param("id", ParseIntPipe) id: number,
     @Req() request: AuthenticatedRequest,

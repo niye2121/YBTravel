@@ -10,11 +10,11 @@ import {
   type StaffRoutingProfile,
 } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
-import { getStoredUser, hasAdminRole } from "../lib/session";
+import { getStoredUser, hasPermission } from "../lib/session";
 
 export const Route = createFileRoute("/assignment-settings")({
   beforeLoad: () => {
-    if (!hasAdminRole(getStoredUser())) throw redirect({ to: "/" });
+    if (!hasPermission(getStoredUser(), "settings.manage")) throw redirect({ to: "/" });
   },
   component: AssignmentSettingsPage,
 });
@@ -70,14 +70,14 @@ function AssignmentSettingsPage() {
         <div className="mb-[12px] flex items-end gap-[12px]">
           <div>
             <div className="text-[10px] font-bold tracking-[1.3px] text-yb-muted4">SYSTEM ADMINISTRATION</div>
-            <h1 className="mt-[2px] text-[25px] font-black">Assignment &amp; Fallback</h1>
+            <h1 className="mt-[2px] yb-page-title">Assignment &amp; Fallback</h1>
             <p className="mt-[3px] text-[12.5px] text-yb-muted3">Configure explainable preferred, secondary, team and escalation routing.</p>
           </div>
           <div className="flex-1" />
           <Link to="/setup" className="text-[12px] font-bold text-yb-green underline">Back to Setup</Link>
         </div>
 
-        <section className="border border-yb-line border-t-[3px] border-t-yb-green bg-white">
+        <section className="yb-card border border-yb-line border-t-[3px] border-t-yb-green bg-white">
           <div className="grid grid-cols-4 gap-[14px] border-b border-yb-line px-[16px] py-[14px]">
             <label className="text-[11.5px] font-bold text-yb-muted">Assignment mode
               <select value={draft.assignmentMode} onChange={(event) => setDraft({ ...draft, assignmentMode: event.target.value as AssignmentSettings["assignmentMode"] })} className={inputClass}>
@@ -123,7 +123,7 @@ function AssignmentSettingsPage() {
           </div>
         </section>
 
-        <section className="mt-[14px] border border-yb-line bg-white">
+        <section className="yb-card mt-[14px] border border-yb-line bg-white">
           <div className="border-b border-yb-line bg-yb-panel-head px-[14px] py-[8px]"><div className="text-[10.5px] font-bold tracking-[1.1px] text-yb-panel-head-text">STAFF AVAILABILITY, CAPACITY &amp; QUALIFICATIONS</div><div className="mt-[2px] text-[11px] text-yb-muted3">An empty request-type selection means the staff member may handle every active request type.</div></div>
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-[11.5px]">

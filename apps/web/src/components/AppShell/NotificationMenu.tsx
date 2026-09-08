@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { notificationsApi, type StaffNotificationRecord } from "../../lib/api";
 import { useAuth } from "../../lib/AuthContext";
+import { useInboxAlerts } from "../../lib/InboxAlerts";
 
 function notificationTime(value: string): string {
   const date = new Date(value);
@@ -15,7 +16,9 @@ function notificationTime(value: string): string {
 }
 
 export function NotificationMenu({ compact = false }: { compact?: boolean }) {
-  const { user } = useAuth();
+  const { user, can } = useAuth();
+  const { sound, toggleSound } = useInboxAlerts();
+  const canReadNotifications = can("notifications.read");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -23,7 +26,7 @@ export function NotificationMenu({ compact = false }: { compact?: boolean }) {
   const notificationsQuery = useQuery({
     queryKey: ["staff-notifications", user?.id],
     queryFn: notificationsApi.list,
-    enabled: Boolean(user),
+    enabled: Boolean(user && canReadNotifications),
     refetchInterval: 15_000,
   });
   const markReadMutation = useMutation({
@@ -47,17 +50,23 @@ export function NotificationMenu({ compact = false }: { compact?: boolean }) {
   async function openNotification(notification: StaffNotificationRecord) {
     if (notification.readAt === null) await markReadMutation.mutateAsync(notification.id);
     setOpen(false);
-    if (notification.entityType === "travel_request") {
+    if (notification.entityType === "conversation") {
+      await navigate({ to: "/inbox", search: { conversationId: Number(notification.entityId) } });
+    } else if (notification.entityType === "travel_request") {
       await navigate({
         to: "/requests/$requestId",
         params: { requestId: notification.entityId },
       });
+    } else if (notification.entityType === "reminder") {
+      await navigate({ to: "/reminders" });
     }
   }
 
   const data = notificationsQuery.data;
   const unreadCount = data?.unreadCount ?? 0;
   const notifications = data?.notifications ?? [];
+
+  if (!canReadNotifications) return null;
 
   return (
     <div ref={containerRef} className="relative">
@@ -95,6 +104,7 @@ export function NotificationMenu({ compact = false }: { compact?: boolean }) {
             )}
           </div>
           <div className="max-h-[430px] overflow-y-auto">
+            {can("whatsapp.read") && <button type="button" aria-pressed={sound} onClick={toggleSound} className="block w-full border-b border-yb-line px-[14px] py-[10px] text-left text-[12px] text-yb-ink">Message sound: {sound ? "On — mute" : "Off — enable"}</button>}
             {notificationsQuery.isLoading && (
               <div className="px-[14px] py-[24px] text-center text-[12px] text-yb-muted3">Loading notifications…</div>
             )}
@@ -118,6 +128,13 @@ export function NotificationMenu({ compact = false }: { compact?: boolean }) {
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            onClick={() => { setOpen(false); void navigate({ to: "/reminders" }); }}
+            className="block w-full border-t border-yb-line bg-yb-toolbar px-[13px] py-[9px] text-left text-[11px] font-bold text-yb-green hover:bg-yb-row-hover"
+          >
+            Open reminder queue →
+          </button>
         </div>
       )}
     </div>

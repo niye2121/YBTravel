@@ -1,6 +1,8 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { Pool, PoolClient } from "pg";
 import { PG_POOL } from "../../database/database.module";
+import { backendEffectivePermissions } from "../auth/permissions";
+import type { StaffRole, StaffPermission } from "@yb-travel/shared";
 
 export type MessageDirection = "inbound" | "outbound";
 export type MessageType = "text" | "audio";
@@ -85,6 +87,25 @@ export class ConversationsService {
       if (!id) throw new Error("Failed to store or locate inbound message");
       if (created && audio) await this.insertAudio(client, id, audio);
       if (created) await client.query("UPDATE conversations SET last_message_at = now() WHERE id = $1", [conversationId]);
+      if (created) {
+        // Commit the alert with the message: provider retries cannot duplicate either.
+        const recipients = await client.query<{ id: number; roles: StaffRole[]; overrides: Array<{ permission: StaffPermission; granted: boolean }> }>(
+          `SELECT u.id, u.roles, COALESCE(jsonb_agg(jsonb_build_object('permission', o.permission_code, 'granted', o.granted))
+             FILTER (WHERE o.permission_code IS NOT NULL), '[]'::jsonb) AS overrides
+           FROM users u LEFT JOIN user_permission_overrides o ON o.user_id = u.id
+           WHERE u.active = true GROUP BY u.id`);
+        const ids = recipients.rows.filter((user) => {
+          const permissions = backendEffectivePermissions(user.roles, user.overrides);
+          return permissions.includes("whatsapp.read") && permissions.includes("notifications.read");
+        }).map((user) => user.id);
+        await client.query(
+          `INSERT INTO staff_notifications (user_id, notification_type, title, message, entity_type, entity_id, source_message_id)
+           SELECT recipient, 'whatsapp_message', 'New WhatsApp message from ' || COALESCE(cl.name, c.display_name, c.phone_number),
+             $4, 'conversation', c.id::text, $2
+           FROM conversations c LEFT JOIN clients cl ON cl.id = c.client_id
+           CROSS JOIN unnest($3::int[]) AS recipient WHERE c.id = $1`,
+          [conversationId, id, ids, messageType === "audio" ? "New voice note — open conversation to listen." : "New message — open conversation to read."]);
+      }
       await client.query("COMMIT");
       return { id, created };
     } catch (error) {

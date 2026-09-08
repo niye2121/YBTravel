@@ -28,6 +28,7 @@ export type StaffRole = z.infer<typeof staffRoleSchema>;
 export const PHASE_ONE_ROLES = [
   "offshore_intake_employee",
   "travel_agent",
+  "supervisor_manager",
   "system_administrator",
 ] as const;
 

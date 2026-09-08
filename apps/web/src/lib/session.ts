@@ -1,4 +1,4 @@
-import type { User } from "@yb-travel/shared";
+import type { StaffPermission, User } from "@yb-travel/shared";
 
 const TOKEN_KEY = "yb_token";
 const USER_KEY = "yb_user";
@@ -34,5 +34,16 @@ export function clearSession(): void {
 }
 
 export function hasAdminRole(user: User | null): boolean {
-  return user?.roles.includes("system_administrator") ?? false;
+  return hasPermission(user, "users.manage") || hasPermission(user, "settings.manage") || hasPermission(user, "integrations.manage") || hasPermission(user, "whatsapp.manage_accounts");
+}
+
+/**
+ * Mirrors an API permission check for navigation and action visibility. The
+ * backend remains authoritative; the role fallback only supports old browser
+ * sessions until their next login refreshes the stored user shape.
+ */
+export function hasPermission(user: User | null, permission: StaffPermission): boolean {
+  if (!user) return false;
+  if (Array.isArray(user.permissions)) return user.permissions.includes(permission);
+  return user.roles.includes("system_administrator");
 }

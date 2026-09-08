@@ -1,4 +1,5 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import type { StaffPermission } from "@yb-travel/shared";
 import { createHash } from "node:crypto";
 import type { Pool } from "pg";
 import { recordAudit } from "../../database/audit";
@@ -48,10 +49,25 @@ export class EntityRecordsService {
     if (Number(actualClientId) !== clientId) throw new BadRequestException("Request does not belong to this client");
   }
 
-  async clientIdForRequest(requestId: number): Promise<number> {
-    const result = await this.pool.query("SELECT client_id FROM travel_requests WHERE id = $1", [requestId]);
-    const clientId = result.rows[0]?.client_id;
+  /**
+   * Resolves an assigned request's client while enforcing P1-14 ownership.
+   * Assignment managers retain cross-queue access for intake and supervision.
+   */
+  async clientIdForRequest(
+    requestId: number,
+    actorUserId: number,
+    actorPermissions: readonly StaffPermission[],
+  ): Promise<number> {
+    const result = await this.pool.query(
+      "SELECT client_id, assigned_user_id FROM travel_requests WHERE id = $1",
+      [requestId],
+    );
+    const row = result.rows[0];
+    const clientId = row?.client_id;
     if (!clientId) throw new NotFoundException("Travel request not found");
+    if (!actorPermissions.includes("requests.assign_any") && row.assigned_user_id !== actorUserId) {
+      throw new ForbiddenException("You can access records only for requests assigned to you");
+    }
     return Number(clientId);
   }
 
@@ -80,7 +96,7 @@ export class EntityRecordsService {
   async listDocuments(clientId: number, requestId: number | null): Promise<EntityDocument[]> {
     await this.resolveScope(clientId, requestId);
     const where = requestId ? "d.travel_request_id = $1" : "d.client_id = $1 AND d.travel_request_id IS NULL";
-    return (await this.pool.query(`${DOCUMENT_SELECT} WHERE ${where} ORDER BY d.created_at DESC, d.id DESC`, [requestId ?? clientId])).rows.map(document);
+    return (await this.pool.query(`${DOCUMENT_SELECT} WHERE ${where} AND d.deleted_at IS NULL ORDER BY d.created_at DESC, d.id DESC`, [requestId ?? clientId])).rows.map(document);
   }
 
   async addDocument(clientId: number, requestId: number | null, file: { originalname: string; mimetype: string; buffer: Buffer; size: number }, description: string | null, actorUserId: number): Promise<EntityDocument> {
@@ -110,23 +126,53 @@ export class EntityRecordsService {
     } catch (error) { await db.query("ROLLBACK"); throw error; } finally { db.release(); }
   }
 
-  async downloadDocument(id: number, actorUserId: number) {
+  async downloadDocument(id: number, actorUserId: number, actorPermissions: readonly StaffPermission[], access: "download" | "view" = "download") {
     const result = await this.pool.query(
-      "SELECT id, file_name, mime_type, content, sha256 FROM entity_documents WHERE id = $1", [id]);
+      "SELECT id, travel_request_id, file_name, mime_type, content, sha256 FROM entity_documents WHERE id = $1 AND deleted_at IS NULL", [id]);
     const row = result.rows[0];
     if (!row) throw new NotFoundException("Document not found");
+    if (row.travel_request_id) {
+      await this.clientIdForRequest(Number(row.travel_request_id), actorUserId, actorPermissions);
+    }
     await this.pool.query(
       `INSERT INTO sensitive_access_events
          (actor_user_id, resource_type, resource_id, action, fields_accessed, purpose)
-       VALUES ($1, 'entity_document', $2, 'download', ARRAY['content'], 'Operational client/request document access')`,
-      [actorUserId, String(id)],
+       VALUES ($1, 'entity_document', $2, $3, ARRAY['content'], 'Operational client/request document access')`,
+      [actorUserId, String(id), access],
     );
     return { fileName: row.file_name as string, mimeType: row.mime_type as string, content: row.content as Buffer, sha256: row.sha256 as string };
   }
 
+  async deleteDocument(id: number, actorUserId: number, actorPermissions: readonly StaffPermission[]) {
+    if (!actorPermissions.includes("records.write")) throw new ForbiddenException("Document deletion requires record write access");
+    const db = await this.pool.connect();
+    try {
+      await db.query("BEGIN");
+      const row = (await db.query(
+        `SELECT d.id, d.client_id, d.travel_request_id, d.file_name, d.mime_type, d.size_bytes, d.sha256,
+                c.is_demo FROM entity_documents d JOIN clients c ON c.id = d.client_id
+         WHERE d.id = $1 AND d.deleted_at IS NULL FOR UPDATE OF d`, [id])).rows[0];
+      if (!row) throw new NotFoundException("Document not found");
+      if (row.is_demo) throw new BadRequestException("Demo documents are read-only");
+      if (row.travel_request_id) {
+        const request = (await db.query("SELECT assigned_user_id FROM travel_requests WHERE id=$1 FOR SHARE", [row.travel_request_id])).rows[0];
+        if (!request || (!actorPermissions.includes("requests.assign_any") && request.assigned_user_id !== actorUserId)) {
+          throw new ForbiddenException("You can delete documents only for requests assigned to you");
+        }
+      }
+      await db.query("UPDATE entity_documents SET deleted_at=now(), deleted_by=$2 WHERE id=$1", [id, actorUserId]);
+      await recordAudit(db, actorUserId, "entity_document.deleted", "entity_document", id,
+        { clientId: row.client_id, travelRequestId: row.travel_request_id, fileName: row.file_name,
+          mimeType: row.mime_type, sizeBytes: row.size_bytes, sha256: row.sha256 },
+        { deleted: true, recoverable: true });
+      await db.query("COMMIT");
+      return { deleted: true, id: String(id) };
+    } catch (error) { await db.query("ROLLBACK"); throw error; } finally { db.release(); }
+  }
+
   async activity(clientId: number, requestId: number | null): Promise<RecordActivity[]> {
     await this.resolveScope(clientId, requestId);
-    const [notes, documents, messages] = await Promise.all([
+    const [notes, documents, messages, deletedDocuments] = await Promise.all([
       this.listNotes(clientId, requestId), this.listDocuments(clientId, requestId),
       this.pool.query(
         `SELECT DISTINCT m.id::text, m.direction, m.message_type, m.body, m.created_at
@@ -136,10 +182,18 @@ export class EntityRecordsService {
          LEFT JOIN travel_requests source_request ON source_request.source_draft_intake_id = draft.id
          WHERE ${requestId ? "(g.travel_request_id = $1 OR source_request.id = $1)" : "(c.client_id = $1 OR g.client_id = $1)"}
          ORDER BY m.created_at DESC LIMIT 100`, [requestId ?? clientId]),
+      this.pool.query(
+        `SELECT d.id::text, d.file_name, d.deleted_at, u.name AS deleted_by_name
+         FROM entity_documents d LEFT JOIN users u ON u.id=d.deleted_by
+         WHERE ${requestId ? "d.travel_request_id=$1" : "d.client_id=$1 AND d.travel_request_id IS NULL"}
+           AND d.deleted_at IS NOT NULL ORDER BY d.deleted_at DESC LIMIT 100`, [requestId ?? clientId]),
     ]);
     const items: RecordActivity[] = [
       ...notes.map((item) => ({ id: `note-${item.id}`, type: "note" as const, title: "Internal note", detail: item.body, actorName: item.createdByName, occurredAt: item.createdAt })),
       ...documents.map((item) => ({ id: `document-${item.id}`, type: "document" as const, title: `Document: ${item.fileName}`, detail: item.description ?? `${item.mimeType} · ${item.sizeBytes} bytes`, actorName: item.uploadedByName, occurredAt: item.createdAt })),
+      ...deletedDocuments.rows.map((row) => ({ id: `document-deleted-${row.id}`, type: "document" as const,
+        title: `Document deleted: ${row.file_name}`, detail: "Removed from attachments; retained for audit and recovery.",
+        actorName: row.deleted_by_name, occurredAt: row.deleted_at })),
       ...messages.rows.map((row) => ({ id: `message-${row.id}`, type: "message" as const, title: `${row.direction === "inbound" ? "Received" : "Sent"} WhatsApp ${row.message_type === "audio" ? "voice note" : "message"}`, detail: row.message_type === "audio" ? "Voice note" : row.body, actorName: null, occurredAt: row.created_at, direction: row.direction })),
     ];
     return items.sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()).slice(0, 100);

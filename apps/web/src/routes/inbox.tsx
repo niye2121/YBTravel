@@ -1,12 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import { Mic, MoreHorizontal, Paperclip, Search, Square } from "lucide-react";
 import QRCode from "react-qr-code";
 import { z } from "zod";
 import { AppHeader } from "../components/AppShell/AppHeader";
+import { WhatsAppSubnav } from "../components/AppShell/WhatsAppSubnav";
+import { useInboxAlerts } from "../lib/InboxAlerts";
 import { Panel } from "../components/AppShell/Panel";
 import { PrimaryButton, SecondaryButton } from "../components/AppShell/buttons";
-import { WhatsAppSubnav } from "../components/AppShell/WhatsAppSubnav";
 import {
   messageTemplatesApi,
   messagingApi,
@@ -19,8 +21,12 @@ import {
 import { NAV_TABS } from "../lib/navTabs";
 import { getSocket } from "../lib/socket";
 import { useAuth } from "../lib/AuthContext";
+import { getStoredUser, hasPermission } from "../lib/session";
 
 export const Route = createFileRoute("/inbox")({
+  beforeLoad: () => {
+    if (!hasPermission(getStoredUser(), "whatsapp.read")) throw redirect({ to: "/" });
+  },
   validateSearch: z.object({
     conversationId: z.coerce.number().int().positive().optional(),
     accountId: z.coerce.number().int().positive().optional(),
@@ -214,24 +220,24 @@ function VoiceNoteComposer({
   };
 
   return (
-    <div className="mb-[7px] border border-yb-line-row bg-[#f7f8f5] px-[8px] py-[7px]">
-      <div className="flex flex-wrap items-center gap-[7px]">
-        <button type="button" disabled={disabled || sending} onClick={recording ? stopRecording : startRecording} className={`border px-[10px] py-[5px] text-[11.5px] font-bold ${recording ? "border-yb-red bg-[#fff3f1] text-yb-red" : "border-yb-line-btn bg-white text-yb-ink2 hover:bg-yb-row-hover"}`}>
-          {recording ? `■ Stop · ${recordingSeconds}s` : "● Record voice note"}
-        </button>
-        <label className="cursor-pointer border border-yb-line-btn bg-white px-[10px] py-[5px] text-[11.5px] text-yb-ink2 hover:bg-yb-row-hover">
-          Upload audio
+    <div className="flex flex-wrap items-center justify-end gap-[6px]">
+      <div className="flex items-center gap-[6px]">
+        <label title="Attach audio" className="flex h-[34px] w-[34px] cursor-pointer items-center justify-center rounded-[9px] border border-[#e6e3da] bg-white text-[#6b6f69] hover:border-[#c3bfb2] hover:text-[#1b1e1c]">
+          <Paperclip size={16} strokeWidth={1.8} />
           <input type="file" accept="audio/webm,audio/ogg,audio/mp4,audio/mpeg,audio/wav" className="sr-only" disabled={disabled || recording || sending} onChange={(event) => {
             const file = event.target.files?.[0];
             if (file) prepareBlob(file, null);
             event.currentTarget.value = "";
           }} />
         </label>
-        {prepared && <audio controls preload="metadata" src={prepared.url} className="h-[32px] min-w-[190px] flex-1" />}
-        {prepared && <button type="button" disabled={sending || disabled} onClick={send} className="border border-yb-green bg-yb-green px-[11px] py-[5px] text-[11.5px] font-bold text-white disabled:opacity-60">{sending ? "Sending…" : "Send voice note"}</button>}
-        {prepared && <button type="button" disabled={sending} onClick={clearPrepared} className="px-[5px] py-[4px] text-[11px] text-yb-muted3 underline">Cancel</button>}
+        <button title={recording ? "Stop recording" : "Record voice note"} type="button" disabled={disabled || sending} onClick={recording ? stopRecording : startRecording} className={`flex h-[34px] items-center justify-center gap-[5px] rounded-[9px] border px-[9px] text-[11px] font-semibold ${recording ? "border-yb-red bg-[#fff3f1] text-yb-red" : "w-[34px] border-[#e6e3da] bg-white text-[#6b6f69] hover:border-[#c3bfb2] hover:text-[#1b1e1c]"}`}>
+          {recording ? <><Square size={12} fill="currentColor" />{recordingSeconds}s</> : <Mic size={16} strokeWidth={1.8} />}
+        </button>
       </div>
-      {error && <div role="alert" className="mt-[5px] text-[11px] text-yb-red">{error}</div>}
+      {prepared && <audio controls preload="metadata" src={prepared.url} className="h-[34px] min-w-[180px] flex-1" />}
+      {prepared && <button type="button" disabled={sending || disabled} onClick={send} className="h-[34px] rounded-[9px] bg-[#0d2f24] px-[11px] text-[11.5px] font-semibold text-white disabled:opacity-60">{sending ? "Sending…" : "Send voice note"}</button>}
+      {prepared && <button type="button" disabled={sending} onClick={clearPrepared} className="px-[5px] py-[4px] text-[11px] text-[#6b6f69] underline">Cancel</button>}
+      {error && <div role="alert" className="w-full text-right text-[11px] text-yb-red">{error}</div>}
     </div>
   );
 }
@@ -239,15 +245,22 @@ function VoiceNoteComposer({
 function InboxPage() {
   const queryClient = useQueryClient();
   const search = Route.useSearch();
-  const { isAdmin } = useAuth();
+  const { can } = useAuth();
+  const canSend = can("whatsapp.send");
+  const canUseTemplates = canSend && can("templates.read") && can("templates.use");
+  const canCreateClient = can("clients.read") && can("clients.create") && can("fees.read");
+  const canReadClients = can("clients.read");
+  const canCreateRequest = can("requests.read") && can("requests.create");
+  const canCreateGroup = can("whatsapp.create_groups");
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const messageHistoryRef = useRef<HTMLDivElement>(null);
   const [selectedId, setSelectedId] = useState<number | null>(search.conversationId ?? null);
   const [reply, setReply] = useState("");
   const [templateId, setTemplateId] = useState("");
   const [templateWarning, setTemplateWarning] = useState<string | null>(null);
   const [conversationSearch, setConversationSearch] = useState("");
   const [conversationFilter, setConversationFilter] = useState<ConversationFilter>("all");
-  const [readConversationIds, setReadConversationIds] = useState<Set<number>>(() => new Set());
+  const { unreadByConversation, setViewedConversation } = useInboxAlerts();
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [detailsPanelOpen, setDetailsPanelOpen] = useState(true);
   const draftReplySelectedRef = useRef(false);
@@ -274,9 +287,9 @@ function InboxPage() {
   const systemSettingsQuery = useQuery({
     queryKey: ["system-settings"],
     queryFn: systemSettingsApi.get,
-    enabled: isAdmin,
+    enabled: can("settings.manage"),
   });
-  const templatesQuery = useQuery({ queryKey: ["message-templates", "active"], queryFn: messageTemplatesApi.listActive });
+  const templatesQuery = useQuery({ queryKey: ["message-templates", "active"], queryFn: messageTemplatesApi.listActive, enabled: canUseTemplates });
   const reconnectMutation = useMutation({
     mutationFn: (accountId: number) => messagingApi.reconnectAccount(accountId),
     onSuccess: (nextStatus) => {
@@ -299,7 +312,6 @@ function InboxPage() {
       queryClient.setQueryData(["messaging", "conversations"], []);
       queryClient.setQueryData(["messaging", "groups"], []);
       setSelectedId(null);
-      setReadConversationIds(new Set());
       await queryClient.invalidateQueries();
     },
   });
@@ -411,16 +423,6 @@ function InboxPage() {
     if (linkedConversation) setSelectedAccountId(linkedConversation.accountId);
   }, [conversationsQuery.data, search.accountId, search.conversationId]);
 
-  useEffect(() => {
-    if (selectedId !== null) {
-      setReadConversationIds((current) => {
-        if (current.has(selectedId)) return current;
-        const next = new Set(current);
-        next.add(selectedId);
-        return next;
-      });
-    }
-  }, [selectedId]);
 
   useEffect(() => {
     const first = conversationsQuery.data?.find((conversation) => selectedAccountId === null || conversation.accountId === selectedAccountId);
@@ -433,6 +435,11 @@ function InboxPage() {
   const conversations = conversationsQuery.data ?? [];
   const groups = groupsQuery.data ?? [];
   const messages = messagesQuery.data ?? [];
+  const lastViewedMessageId = Math.max(0, ...messages.map((message) => message.id));
+  useEffect(() => {
+    setViewedConversation(selectedId === null ? null : { id: selectedId, throughMessageId: lastViewedMessageId });
+    return () => setViewedConversation(null);
+  }, [selectedId, lastViewedMessageId, setViewedConversation]);
   const selectedConversation = conversations.find((conversation) => conversation.id === selectedId) ?? null;
   const selectedGroup = groups.find((group) => group.conversationId === selectedId) ?? null;
   const normalizedSearch = conversationSearch.trim().toLowerCase();
@@ -449,19 +456,24 @@ function InboxPage() {
       return groups.some((group) => group.conversationId === conversation.id);
     }
     if (conversationFilter === "unread") {
-      return Boolean(conversation.lastMessageBody) && !readConversationIds.has(conversation.id);
+      return (unreadByConversation[conversation.id] ?? 0) > 0;
     }
     return true;
   });
   const unreadCount = accountConversations.filter(
-    (conversation) => Boolean(conversation.lastMessageBody) && !readConversationIds.has(conversation.id),
+    (conversation) => (unreadByConversation[conversation.id] ?? 0) > 0,
   ).length;
   const phoneDigits = conversationSearch.replace(/[^0-9]/g, "").replace(/^00/, "");
   const canStartConversation =
-    /^[+0-9\s().-]+$/.test(conversationSearch.trim()) && /^[1-9]\d{7,14}$/.test(phoneDigits);
+    canSend && /^[+0-9\s().-]+$/.test(conversationSearch.trim()) && /^[1-9]\d{7,14}$/.test(phoneDigits);
   const selectedTitle = selectedConversation?.displayName ?? selectedConversation?.phoneNumber ?? "";
   const groupTravellers = selectedGroup?.participants.filter((participant) => participant.type === "traveller") ?? [];
   const groupStaff = selectedGroup?.participants.filter((participant) => participant.type === "staff") ?? [];
+
+  useEffect(() => {
+    const history = messageHistoryRef.current;
+    if (history) history.scrollTop = history.scrollHeight;
+  }, [messages.length, selectedId]);
 
   const startConversation = () => {
     if (canStartConversation && !startConversationMutation.isPending) {
@@ -470,24 +482,22 @@ function InboxPage() {
   };
 
   return (
-    <div className="yb-reference-scale min-h-screen min-w-[1180px] bg-[#eef0ea] text-yb-ink" style={{ fontFamily: 'Helvetica, "Helvetica Neue", Arial, sans-serif' }}>
-      <AppHeader tabs={NAV_TABS} compact />
+    <div className="yb-inbox-redesign flex h-screen min-h-[780px] flex-col overflow-auto bg-[#f6f5f1] text-[#1b1e1c]">
+      <AppHeader tabs={NAV_TABS} query={conversationSearch} onQueryChange={setConversationSearch} />
+
       <WhatsAppSubnav active="inbox" conversationCount={conversations.length} groupCount={groups.length} showSecondaryTabs />
 
-      <div className="flex items-end gap-[12px] px-[16px] pt-[12px] pb-[10px]">
-        <div className="flex h-[22px] w-[22px] items-center justify-center border border-yb-line-btn bg-white">
-          <div className="h-[10px] w-[10px] bg-yb-gold" />
-        </div>
+      <div className="flex shrink-0 flex-wrap items-center gap-[20px] px-[24px] pt-[18px] pb-[14px]">
         <div>
-          <div className="text-[10px] tracking-[1.4px] text-yb-muted4">INBOX</div>
-          <div className="flex items-baseline gap-[9px]">
-            <h1 className="text-[24px] font-bold tracking-[-0.2px]">WhatsApp</h1>
-            <span className="flex items-center gap-[5px] text-[11.5px] text-yb-muted2">
-              <span className={`h-[7px] w-[7px] rounded-full ${status?.status === "connected" ? "bg-[#2f8a4f]" : statusQuery.isError ? "bg-yb-gold" : "bg-yb-red"}`} />
+          <div className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-[#8e918a]">Inbox</div>
+          <div className="mt-[2px] flex flex-wrap items-center gap-[10px]">
+            <h1 className="m-0 yb-page-title">WhatsApp</h1>
+            <span className="flex items-center gap-[6px] rounded-full border border-[#cfe0d2] bg-[#e8f0e9] px-[10px] py-[3px] text-[11.5px] font-semibold text-[#1f5f43]">
+              <span className={`h-[6px] w-[6px] rounded-full ${status?.status === "connected" ? "bg-[#2e8a5c]" : statusQuery.isError ? "bg-yb-gold" : "bg-yb-red"}`} />
               {statusQuery.isError
                 ? "API unavailable"
                 : status?.status === "connected"
-                ? `Connected · ${displayPhone(status.phoneNumber)}`
+                ? <>Connected <span className="font-mono font-normal text-[#4a7a63]">{displayPhone(status.phoneNumber)}</span></>
                 : status?.status === "qr_pending"
                   ? "Waiting for scan"
                   : "Disconnected"}
@@ -495,56 +505,33 @@ function InboxPage() {
           </div>
         </div>
         <div className="flex-1" />
-        <label className="flex h-[29px] items-center gap-[7px] border border-yb-line-btn bg-white px-[9px] text-[11.5px] font-bold text-yb-ink2">
+        <label className="flex h-[36px] items-center gap-[8px] rounded-[9px] border border-[#ddd9cf] bg-white px-[12px] text-[11px] text-[#8e918a]">
           <span>Account</span>
           <select
             aria-label="WhatsApp account"
             value={selectedAccountId ?? ""}
             onChange={(event) => { setSelectedAccountId(Number(event.target.value)); setSelectedId(null); }}
-            className="bg-white text-[11.5px] font-normal outline-none"
+            className="max-w-[220px] bg-white text-[13px] font-medium text-[#1b1e1c] outline-none"
           >
             {(accountsQuery.data ?? []).map((account) => (
               <option key={account.id} value={account.id}>{account.label}{account.phoneNumber ? ` · ${displayPhone(account.phoneNumber)}` : ""}</option>
             ))}
           </select>
         </label>
-        {isAdmin && systemSettingsQuery.data?.testDataDeletionEnabled && (
-          <SecondaryButton
-            className="h-[29px] rounded-none border-yb-red bg-yb-red px-[14px] py-[6px] text-[12px] text-white hover:bg-[#7f2117]"
-            disabled={resetTestDataMutation.isPending}
-            onClick={() => {
-              const confirmation = window.prompt(
-                "This permanently deletes all operational test data, including WhatsApp messages, conversations, groups, requests, clients, travellers, assignments, and notifications. Users, settings, audit history, and the WhatsApp connection are preserved.\n\nType DELETE ALL TEST DATA to continue.",
-              );
-              if (confirmation === "DELETE ALL TEST DATA") {
-                resetTestDataMutation.mutate("DELETE ALL TEST DATA");
-              }
-            }}
-          >
-            {resetTestDataMutation.isPending ? "Deleting test data…" : "Delete all test data"}
-          </SecondaryButton>
-        )}
-        {isAdmin && status?.status === "connected" && (
-          <SecondaryButton
-            className="h-[29px] rounded-none border-yb-red px-[14px] py-[6px] text-[12px] text-yb-red hover:bg-[#fff3f1]"
-            disabled={disconnectMutation.isPending}
-            onClick={() => {
-              const confirmed = window.confirm(
-                `Disconnect ${status.label}? Its messages stay in the database, but this number will be logged out and require a new QR code. Other WhatsApp accounts are not affected.`,
-              );
-              if (confirmed) disconnectMutation.mutate();
-            }}
-          >
-            {disconnectMutation.isPending ? "Disconnecting…" : "Disconnect WhatsApp"}
-          </SecondaryButton>
-        )}
-        <Link to="/whatsapp-groups" className="border border-yb-line-btn bg-white px-[14px] py-[6px] text-[12px] text-yb-ink2 hover:bg-yb-hover-btn">
+        <Link to="/whatsapp-groups" className="flex h-[36px] items-center rounded-[9px] border border-[#ddd9cf] bg-white px-[14px] text-[13px] font-medium text-[#1b1e1c] hover:border-[#c3bfb2]">
           Managed Groups
         </Link>
-        <PrimaryButton className="rounded-none px-[14px] py-[6px] text-[12px]" onClick={() => searchInputRef.current?.focus()}>+ New Conversation</PrimaryButton>
+        <details className="relative">
+          <summary title="More actions" className="flex h-[36px] w-[36px] cursor-pointer list-none items-center justify-center rounded-[9px] border border-[#ddd9cf] bg-white text-[#6b6f69] hover:border-[#c3bfb2] hover:text-[#1b1e1c]"><MoreHorizontal size={17} /></summary>
+          <div className="absolute right-0 top-[42px] z-30 min-w-[210px] rounded-[11px] border border-[#e6e3da] bg-white p-[6px] shadow-[0_8px_24px_rgba(15,25,20,0.16)]">
+            {can("whatsapp.manage_accounts") && status?.status === "connected" && <button type="button" disabled={disconnectMutation.isPending} onClick={() => { const confirmed = window.confirm(`Disconnect ${status.label}? Its messages stay in the database, but this number will be logged out and require a new QR code. Other WhatsApp accounts are not affected.`); if (confirmed) disconnectMutation.mutate(); }} className="block w-full rounded-[7px] px-[10px] py-[8px] text-left text-[12.5px] text-yb-red hover:bg-[#fff4f1]">{disconnectMutation.isPending ? "Disconnecting…" : "Disconnect WhatsApp"}</button>}
+            {can("test_data.delete") && systemSettingsQuery.data?.testDataDeletionEnabled && <button type="button" disabled={resetTestDataMutation.isPending} onClick={() => { const confirmation = window.prompt("This permanently deletes all operational test data, including WhatsApp messages, conversations, groups, requests, clients, travellers, assignments, and notifications. Users, settings, audit history, and the WhatsApp connection are preserved.\n\nType DELETE ALL TEST DATA to continue."); if (confirmation === "DELETE ALL TEST DATA") resetTestDataMutation.mutate("DELETE ALL TEST DATA"); }} className="block w-full rounded-[7px] px-[10px] py-[8px] text-left text-[12.5px] text-yb-red hover:bg-[#fff4f1]">{resetTestDataMutation.isPending ? "Deleting test data…" : "Delete all test data"}</button>}
+          </div>
+        </details>
+        {canSend && <PrimaryButton className="h-[36px] rounded-[9px] border-[#0d2f24] bg-[#0d2f24] px-[16px] text-[13px] font-semibold shadow-[0_1px_2px_rgba(13,47,36,0.24)]" onClick={() => searchInputRef.current?.focus()}>New Conversation</PrimaryButton>}
       </div>
 
-      <div className="px-[16px] pb-[24px]">
+      <div className="flex min-h-0 flex-1 flex-col px-[24px] pb-[24px] max-md:px-[12px] max-md:pb-[12px]">
         {(disconnectMutation.isError || resetTestDataMutation.isError) && (
           <div role="alert" className="mb-[10px] border border-yb-red bg-[#fff3f1] px-[12px] py-[8px] text-[12px] text-yb-red">
             {resetTestDataMutation.error instanceof Error
@@ -572,7 +559,7 @@ function InboxPage() {
           </Panel>
         ) : (
           <>
-          {status?.status !== "connected" && (
+          {can("whatsapp.manage_accounts") && status?.status !== "connected" && (
           <div className="mb-[10px]">
           <Panel title="CONNECT WHATSAPP" right="message history and draft review remain available below" pad>
             {status?.status === "qr_pending" && status.qr ? (
@@ -603,16 +590,18 @@ function InboxPage() {
           </Panel>
           </div>
           )}
-          <div className={`grid h-[calc(100vh-190px)] min-h-[520px] max-h-[700px] overflow-hidden border border-yb-line bg-white ${detailsPanelOpen ? "grid-cols-[minmax(230px,280px)_minmax(340px,1fr)_minmax(390px,430px)]" : "grid-cols-[minmax(230px,280px)_minmax(340px,1fr)]"}`}>
-            <section className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-yb-line-soft">
-              <div className="flex items-center border-b border-yb-line-soft bg-yb-panel-head px-[10px] py-[7px]">
-                <div className="text-[10.5px] font-bold tracking-[1.2px] text-yb-panel-head-text">CONVERSATIONS</div>
+          <div className={`grid min-h-[560px] flex-1 gap-[12px] overflow-hidden ${detailsPanelOpen ? "grid-cols-1 md:grid-cols-[minmax(220px,260px)_minmax(0,1fr)] xl:grid-cols-[minmax(260px,300px)_minmax(420px,1fr)_minmax(300px,340px)]" : "grid-cols-1 md:grid-cols-[minmax(220px,260px)_minmax(0,1fr)]"}`}>
+            <section className="yb-card yb-inbox-list min-h-0 min-w-0 flex-col overflow-hidden rounded-[14px] border border-[#e6e3da] bg-white">
+              <div className="flex items-center px-[14px] pt-[14px] pb-[10px]">
+                <div className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-[#8e918a]">Conversations</div>
                 <div className="flex-1" />
-                <div className="text-[11px] text-yb-muted3">{accountConversations.length} open</div>
+                <div className="text-[11.5px] text-[#8e918a]">{accountConversations.length} open</div>
               </div>
-              <div className="border-b border-yb-line-row p-[10px]">
+              <div className="border-b border-[#eeece5] px-[14px] pb-[10px]">
                 <div className="flex gap-[7px]">
-                  <input
+                  <div className="flex h-[34px] min-w-0 flex-1 items-center gap-[8px] rounded-[9px] border border-[#e6e3da] bg-[#f6f5f1] px-[11px]">
+                    <Search size={13} strokeWidth={1.7} className="shrink-0 text-[#a5a89f]" />
+                    <input
                     ref={searchInputRef}
                     value={conversationSearch}
                     onChange={(event) => {
@@ -620,17 +609,18 @@ function InboxPage() {
                       startConversationMutation.reset();
                     }}
                     onKeyDown={(event) => { if (event.key === "Enter") startConversation(); }}
-                    placeholder="Search name or +1 718 555 0123"
+                    placeholder="Search name or number"
                     aria-label="Search conversations or enter a WhatsApp phone number"
-                    className="h-[28px] min-w-0 flex-1 border border-[#8d968e] bg-white px-[7px] text-[12px] text-yb-ink outline-none focus:border-yb-green"
+                    className="min-w-0 flex-1 bg-transparent text-[13px] text-[#1b1e1c] outline-none"
                   />
+                  </div>
                   {canStartConversation && (
-                    <PrimaryButton className="h-[28px] rounded-none px-[11px] text-[11px]" disabled={startConversationMutation.isPending} onClick={startConversation}>
+                    <PrimaryButton className="h-[34px] rounded-[8px] px-[11px] text-[11px]" disabled={startConversationMutation.isPending} onClick={startConversation}>
                       {startConversationMutation.isPending ? "Checking…" : "Start"}
                     </PrimaryButton>
                   )}
                 </div>
-                <div className="mt-[7px] flex gap-[6px]">
+                <div className="mt-[10px] flex gap-[6px]">
                   {([
                     ["all", "All", accountConversations.length],
                     ["unread", "Unread", unreadCount],
@@ -640,7 +630,7 @@ function InboxPage() {
                       key={value}
                       type="button"
                       onClick={() => setConversationFilter(value)}
-                      className={`border px-[9px] py-[3px] text-[11px] ${conversationFilter === value ? "border-yb-green bg-yb-green font-bold text-white" : "border-yb-line-btn bg-white text-yb-ink2 hover:bg-yb-row-hover"}`}
+                      className={`flex-1 rounded-[7px] border px-[8px] py-[5px] text-[12px] font-medium ${conversationFilter === value ? "border-[#0d2f24] bg-[#0d2f24] font-semibold text-white" : "border-[#e6e3da] bg-white text-[#5d615b] hover:border-[#c3bfb2]"}`}
                     >
                       {label}{count > 0 && value !== "all" ? ` ${count}` : ""}
                     </button>
@@ -653,7 +643,7 @@ function InboxPage() {
                 )}
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
+              <div className="min-h-0 flex-1 overflow-y-auto p-[6px] overscroll-contain [scrollbar-gutter:stable]">
                 {filteredConversations.map((conversation) => {
                   const active = conversation.id === selectedId;
                   const managedGroup = groups.find((group) => group.conversationId === conversation.id);
@@ -663,23 +653,23 @@ function InboxPage() {
                       key={conversation.id}
                       type="button"
                       onClick={() => setSelectedId(conversation.id)}
-                      className={`relative grid w-full grid-cols-[32px_minmax(0,1fr)] gap-[9px] border-b border-yb-line-row border-l-[3px] px-[10px] py-[10px] text-left ${active ? "border-l-yb-green bg-yb-row-hover" : "border-l-transparent bg-white hover:bg-yb-row-hover"}`}
+                      className={`relative mb-[2px] grid w-full grid-cols-[34px_minmax(0,1fr)] gap-[11px] rounded-[11px] px-[10px] py-[11px] text-left shadow-[inset_3px_0_0_transparent] ${active ? "bg-[#f1f5f1] shadow-[inset_3px_0_0_#0d2f24]" : "bg-transparent hover:bg-[#f6f5f1]"}`}
                     >
-                      <span className={`flex h-[30px] w-[30px] items-center justify-center rounded-full text-[11px] font-bold text-white ${managedGroup ? "bg-[#3d6b52]" : "bg-yb-green"}`}>
+                      <span className={`flex h-[34px] w-[34px] items-center justify-center rounded-full text-[13px] font-semibold ${active ? "bg-[#0d2f24] text-[#e0b64a]" : managedGroup ? "bg-[#e6eee8] text-[#3d6b52]" : "bg-[#eef0ec] text-[#5d615b]"}`}>
                         {initials(title)}
                       </span>
                       <span className="min-w-0">
                         <span className="flex items-baseline gap-[6px]">
-                          <span className="truncate text-[12.5px] font-bold text-yb-ink">{title}</span>
+                          <span className="truncate text-[13.5px] font-semibold text-[#1b1e1c]">{title}</span>
                           <span className="flex-1" />
-                          <span className="whitespace-nowrap text-[10.5px] text-yb-muted4">{formatTime(conversation.lastMessageAt)}</span>
+                          <span className="whitespace-nowrap text-[11px] text-[#9a9d96]">{formatTime(conversation.lastMessageAt)}</span>
                         </span>
-                        <span className="mt-[1px] block truncate text-[11px] text-yb-muted3">
+                        <span className="mt-[2px] block truncate font-mono text-[11px] text-[#9a9d96]">
                           {managedGroup ? `${managedGroup.clientName} · ${managedGroup.requestNumber}` : displayPhone(conversation.phoneNumber)}
                         </span>
-                        <span className="mt-[4px] block truncate text-[11.5px] text-yb-ink2">{conversation.lastMessageBody ?? "No messages yet"}</span>
-                        {Boolean(conversation.lastMessageBody) && !readConversationIds.has(conversation.id) && (
-                          <span className="absolute right-[10px] bottom-[9px] rounded-full bg-yb-red px-[6px] py-px text-[10px] font-bold text-white">1</span>
+                        <span className="mt-[5px] block truncate text-[12.5px] text-[#8e918a]">{conversation.lastMessageBody ?? "No messages yet"}</span>
+                        {(unreadByConversation[conversation.id] ?? 0) > 0 && (
+                          <span className="absolute right-[10px] bottom-[9px] flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#0d2f24] px-[5px] text-[11px] font-semibold text-white">{unreadByConversation[conversation.id]}</span>
                         )}
                       </span>
                     </button>
@@ -694,14 +684,14 @@ function InboxPage() {
               </div>
             </section>
 
-            <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#f7f8f5]">
+            <section className="yb-card flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[14px] border border-[#e6e3da] bg-white">
               {selectedConversation ? (
                 <>
-                  <div className="flex min-h-[46px] flex-wrap items-center gap-[10px] border-b border-yb-line-soft bg-white px-[14px] py-[8px]">
-                    <div className="flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-full bg-yb-green text-[11px] font-bold text-white">{initials(selectedTitle)}</div>
+                  <div className="flex min-h-[60px] flex-wrap items-center gap-[12px] border-b border-[#eeece5] bg-white px-[16px] py-[12px]">
+                    <div className="flex h-[36px] w-[36px] shrink-0 items-center justify-center rounded-full bg-[#0d2f24] text-[14px] font-semibold text-[#e0b64a]">{initials(selectedTitle)}</div>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[13px] font-bold">{selectedTitle}</div>
-                      <div className="truncate text-[11px] text-yb-muted3">
+                      <div className="truncate text-[15px] font-semibold tracking-[-0.01em]">{selectedTitle}</div>
+                      <div className="truncate font-mono text-[11.5px] text-[#8e918a]">
                         {selectedGroup
                           ? `${selectedConversation.accountLabel} · ${displayPhone(selectedConversation.phoneNumber)} · ${selectedGroup.clientName}`
                           : selectedConversation.clientName
@@ -709,25 +699,25 @@ function InboxPage() {
                             : `${selectedConversation.accountLabel} · ${displayPhone(selectedConversation.phoneNumber)}`}
                       </div>
                     </div>
-                    <Link to="/requests" className="border border-yb-line-btn bg-white px-[11px] py-[5px] text-[11.5px] text-yb-ink2 hover:bg-yb-hover-btn">
+                    {canCreateRequest && <Link to="/requests" className="flex h-[32px] items-center rounded-[8px] bg-[#0d2f24] px-[13px] text-[12.5px] font-semibold text-white hover:bg-[#134a37]">
                       Create Request
-                    </Link>
-                    <Link to="/whatsapp-groups" className="border border-yb-line-btn bg-white px-[11px] py-[5px] text-[11.5px] text-yb-ink2 hover:bg-yb-hover-btn">
+                    </Link>}
+                    {canCreateGroup && <Link to="/whatsapp-groups" className="flex h-[32px] items-center rounded-[8px] border border-[#ddd9cf] bg-white px-[13px] text-[12.5px] font-medium text-[#1b1e1c] hover:border-[#c3bfb2]">
                       {selectedGroup ? "Managed Group" : "Create Group"}
-                    </Link>
+                    </Link>}
                     <button
                       type="button"
                       aria-expanded={detailsPanelOpen}
                       aria-controls="inbox-details-panel"
                       onClick={() => setDetailsPanelOpen((open) => !open)}
-                      className="border border-yb-line-btn bg-white px-[11px] py-[5px] text-[11.5px] text-yb-ink2 hover:bg-yb-hover-btn"
+                      className="flex h-[32px] items-center rounded-[8px] border border-[#ddd9cf] bg-white px-[13px] text-[12.5px] font-medium text-[#1b1e1c] hover:border-[#c3bfb2]"
                     >
                       {detailsPanelOpen ? "Hide AI panel" : "Show AI panel"}
                     </button>
                     <details className="relative">
-                      <summary className="flex h-[28px] w-[32px] cursor-pointer list-none items-center justify-center border border-yb-line-btn bg-white text-[15px] text-yb-ink2 hover:bg-yb-hover-btn">…</summary>
-                      <div className="absolute right-0 top-[32px] z-10 min-w-[145px] border border-yb-line-btn bg-white py-[4px] shadow-sm">
-                        <Link to="/clients" className="block px-[10px] py-[6px] text-[11.5px] text-yb-ink2 hover:bg-yb-row-hover">View clients</Link>
+                      <summary className="flex h-[32px] w-[32px] cursor-pointer list-none items-center justify-center rounded-[8px] border border-[#ddd9cf] bg-white text-[#6b6f69] hover:border-[#c3bfb2]"><MoreHorizontal size={16} /></summary>
+                      <div className="absolute right-0 top-[36px] z-10 min-w-[145px] rounded-[9px] border border-[#ddd9cf] bg-white p-[4px] shadow-sm">
+                        {canReadClients && <Link to="/clients" className="block px-[10px] py-[6px] text-[11.5px] text-yb-ink2 hover:bg-yb-row-hover">View clients</Link>}
                         <Link to="/whatsapp-groups" className="block px-[10px] py-[6px] text-[11.5px] text-yb-ink2 hover:bg-yb-row-hover">View groups</Link>
                       </div>
                     </details>
@@ -736,7 +726,7 @@ function InboxPage() {
                     <div className="flex items-center gap-[10px] border-b border-[#e6d9ab] bg-[#fdf7e6] px-[14px] py-[7px]">
                       <div className="text-[11.5px] text-[#8a6d10]">This number isn&apos;t linked to a client yet — link it so messages file to the right profile.</div>
                       <div className="flex-1" />
-                      <Link
+                      {canCreateClient && <Link
                         to="/clients"
                         search={{
                           newClient: true,
@@ -747,23 +737,24 @@ function InboxPage() {
                         className="border border-[#d1bd76] bg-white px-[10px] py-[4px] text-[11px] font-bold text-yb-ink2 hover:bg-[#fffaf0]"
                       >
                         Link to client
-                      </Link>
+                      </Link>}
                     </div>
                   )}
                   <div
+                    ref={messageHistoryRef}
                     aria-label="Message history"
-                    className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-[16px] py-[14px] [scrollbar-gutter:stable]"
+                    className="min-h-0 flex-1 overflow-y-auto bg-[#fbfaf7] px-[22px] py-[20px] overscroll-contain [scrollbar-gutter:stable]"
                   >
-                    <div className="flex min-h-full flex-col gap-[8px]">
-                      {messages.length > 0 && <div className="self-center rounded-[10px] bg-[#e9ece5] px-[10px] py-[2px] text-[10px] font-bold tracking-[1px] text-yb-muted4">TODAY</div>}
+                    <div className="flex min-h-full flex-col gap-[14px]">
+                      {messages.length > 0 && <div className="self-center rounded-full bg-[#efece4] px-[12px] py-[4px] text-[11px] font-medium text-[#7d807a]">Today</div>}
                       {messages.map((message) => (
-                        <div key={message.id} className={`max-w-[62%] border px-[10px] pt-[7px] pb-[5px] ${message.direction === "outbound" ? "ml-auto rounded-[8px_2px_8px_8px] border-yb-green-darker bg-yb-green text-white" : "rounded-[2px_8px_8px_8px] border-yb-line-soft bg-white text-yb-ink"}`}>
+                        <div key={message.id} className={`max-w-[min(620px,78%)] px-[14px] pt-[11px] pb-[8px] shadow-[0_1px_2px_rgba(20,25,20,0.05)] ${message.direction === "outbound" ? "ml-auto rounded-[14px_14px_4px_14px] bg-[#0d2f24] text-[#f2f5f2]" : "rounded-[14px_14px_14px_4px] border border-[#e9e6de] bg-white text-[#1b1e1c]"}`}>
                           {message.messageType === "audio" ? (
                             <VoiceNotePlayer messageId={message.id} available={message.hasAudio} />
                           ) : (
-                            <div className="whitespace-pre-wrap text-[13px] leading-[1.45]">{message.body}</div>
+                            <div className="whitespace-pre-wrap text-[14px] leading-[1.5]">{message.body}</div>
                           )}
-                          <div className={`mt-[3px] flex items-center justify-end gap-[5px] text-[10px] ${message.direction === "outbound" ? "text-[#bfd2c7]" : "text-yb-muted4"}`}>
+                          <div className={`mt-[5px] flex items-center justify-end gap-[5px] text-[10.5px] ${message.direction === "outbound" ? "text-[#f2f5f2]/60" : "text-[#a5a89f]"}`}>
                             <span>{formatTime(message.createdAt)}</span>
                             {message.direction === "outbound" && (
                               <span title="Accepted by WhatsApp; recipient delivery is not yet confirmed">✓</span>
@@ -774,34 +765,26 @@ function InboxPage() {
                       {messages.length === 0 && <div className="flex flex-1 items-center justify-center text-[13px] text-yb-muted3">No messages yet. Send the first message below.</div>}
                     </div>
                   </div>
-                  <div className="border-t border-yb-line-soft bg-white px-[12px] py-[8px]">
-                    <VoiceNoteComposer
-                      key={selectedConversation.id}
-                      disabled={status?.status !== "connected"}
-                      onSend={async (audio, durationSeconds) => {
-                        await sendVoiceNoteMutation.mutateAsync({ audio, durationSeconds });
-                      }}
-                    />
-                    <div className="mb-[7px] border border-[#ccd3cb] bg-[#f7f8f5] px-[8px] py-[7px]">
-                      <div className="mb-[5px] text-[10px] font-bold uppercase tracking-[0.1em] text-yb-muted4">Approved WhatsApp template</div>
-                      <div className="flex gap-[6px]">
-                        <select aria-label="Approved WhatsApp template" value={templateId} onChange={(event) => { setTemplateId(event.target.value); setTemplateWarning(null); }} className="h-[29px] min-w-0 flex-1 border border-[#8d968e] bg-white px-[7px] text-[11px]">
-                          <option value="">Select a template…</option>
+                  {canSend ? <div className="flex flex-col gap-[10px] border-t border-[#eeece5] bg-white px-[16px] pt-[12px] pb-[14px]">
+                    <div className="flex items-center gap-[8px]">
+                      <div className="flex min-w-0 flex-1 items-center gap-[7px] overflow-x-auto pb-[2px]">
+                        {QUICK_REPLIES.map((quickReply) => (
+                          <button key={quickReply.label} type="button" onClick={() => setReply(quickReply.text)} className="shrink-0 whitespace-nowrap rounded-full border border-[#e6e3da] bg-[#faf9f5] px-[12px] py-[4px] text-[12.5px] text-[#3d423c] hover:border-[#c3bfb2] hover:bg-white">
+                            {quickReply.label}
+                          </button>
+                        ))}
+                      </div>
+                      {canUseTemplates && <div className="flex h-[30px] shrink-0 items-center gap-[6px] rounded-[9px] border border-[#e6e3da] bg-[#faf9f5] px-[10px]">
+                        <select aria-label="Approved WhatsApp template" value={templateId} onChange={(event) => { setTemplateId(event.target.value); setTemplateWarning(null); }} className="max-w-[105px] bg-transparent text-[12px] text-[#6b6f69] outline-none">
+                          <option value="">Template</option>
                           {(templatesQuery.data ?? []).map((template) => <option key={template.id} value={template.id}>{template.purpose} · {template.name} ({template.languageName})</option>)}
                         </select>
-                        <button type="button" disabled={!templateId || selectedId === null || renderTemplateMutation.isPending} onClick={() => renderTemplateMutation.mutate()} className="border border-yb-green bg-white px-[10px] text-[10.5px] font-bold text-yb-green disabled:opacity-50">{renderTemplateMutation.isPending ? "Preparing…" : "Use template"}</button>
-                      </div>
-                      {templateWarning && <div role="alert" className="mt-[5px] text-[10.5px] font-bold text-[#8a6d10]">{templateWarning}. Unresolved placeholders remain in the draft.</div>}
-                      {renderTemplateMutation.isError && <div role="alert" className="mt-[5px] text-[10.5px] text-yb-red">{renderTemplateMutation.error instanceof Error ? renderTemplateMutation.error.message : "Template could not be prepared"}</div>}
+                        {templateId && <button type="button" disabled={selectedId === null || renderTemplateMutation.isPending} onClick={() => renderTemplateMutation.mutate()} className="text-[11px] font-semibold text-[#0d4030] disabled:opacity-50">{renderTemplateMutation.isPending ? "Preparing…" : "Use"}</button>}
+                      </div>}
                     </div>
-                    <div className="mb-[7px] flex flex-wrap gap-[6px]">
-                      {QUICK_REPLIES.map((quickReply) => (
-                        <button key={quickReply.label} type="button" onClick={() => setReply(quickReply.text)} className="border border-[#ccd3cb] bg-[#f2f5f0] px-[9px] py-[3px] text-[11px] text-[#3c443d] hover:bg-[#e7ece5]">
-                          {quickReply.label}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-[8px]">
+                    {templateWarning && <div role="alert" className="text-[10.5px] font-semibold text-[#8a6d10]">{templateWarning}. Unresolved placeholders remain in the draft.</div>}
+                    {renderTemplateMutation.isError && <div role="alert" className="text-[10.5px] text-yb-red">{renderTemplateMutation.error instanceof Error ? renderTemplateMutation.error.message : "Template could not be prepared"}</div>}
+                    <div className="flex items-end gap-[10px] rounded-[12px] border border-[#ddd9cf] bg-white p-[10px] pl-[14px] focus-within:border-[#0d2f24]">
                       <textarea
                         value={reply}
                         onChange={(event) => setReply(event.target.value)}
@@ -814,23 +797,22 @@ function InboxPage() {
                         rows={2}
                         placeholder="Type a reply…  (Shift+Enter for a new line)"
                         aria-label="Reply message"
-                        className="w-full resize-none border border-[#8d968e] px-[8px] py-[6px] text-[13px] leading-[1.45] text-yb-ink outline-none focus:border-yb-green"
+                        className="min-w-0 flex-1 resize-none bg-transparent py-[2px] text-[14px] leading-[1.5] text-[#1b1e1c] outline-none"
                       />
-                      <div className="flex flex-col gap-[5px]">
-                        <PrimaryButton className="rounded-none px-[20px] py-[7px] text-[12px]" disabled={!reply.trim() || sendMutation.isPending} onClick={() => sendMutation.mutate(reply)}>{sendMutation.isPending ? "Sending…" : "Send"}</PrimaryButton>
-                        <div className="text-right text-[10.5px] text-yb-muted4">Logged to client file</div>
-                      </div>
+                      <VoiceNoteComposer key={selectedConversation.id} disabled={status?.status !== "connected"} onSend={async (audio, durationSeconds) => { await sendVoiceNoteMutation.mutateAsync({ audio, durationSeconds }); }} />
+                      <PrimaryButton className="h-[34px] rounded-[9px] border-[#0d2f24] bg-[#0d2f24] px-[18px] text-[13px] font-semibold" disabled={!reply.trim() || sendMutation.isPending} onClick={() => sendMutation.mutate(reply)}>{sendMutation.isPending ? "Sending…" : "Send"}</PrimaryButton>
                     </div>
+                    <div className="text-[11px] text-[#9a9d96]">Replies are logged to the client file automatically.</div>
                     {sendMutation.isError && <div role="alert" className="mt-[5px] text-[11.5px] text-yb-red">{sendMutation.error instanceof Error ? sendMutation.error.message : "Could not send message"}</div>}
-                  </div>
+                  </div> : <div className="border-t border-[#eeece5] bg-[#faf9f5] px-[16px] py-[13px] text-[12px] text-[#6b6f69]">You have read-only access to WhatsApp conversations.</div>}
                 </>
               ) : (
                 <div className="flex flex-1 items-center justify-center text-[13px] text-yb-muted3">Pick a conversation on the left.</div>
               )}
             </section>
 
-            {detailsPanelOpen && <aside id="inbox-details-panel" className="min-h-0 min-w-0 overflow-y-auto overscroll-contain border-l border-yb-line-soft bg-yb-toolbar [scrollbar-gutter:stable]">
-              <div className="border-b border-yb-line-soft bg-yb-panel-head px-[10px] py-[7px] text-[10.5px] font-bold tracking-[1.2px] text-yb-panel-head-text">AI DRAFT INTAKE</div>
+            {detailsPanelOpen && <aside id="inbox-details-panel" className="yb-inbox-details min-h-0 min-w-0 overflow-y-auto rounded-[14px] border border-[#e6e3da] bg-white overscroll-contain [scrollbar-gutter:stable]">
+              <div className="border-b border-[#eeece5] px-[14px] py-[14px] font-mono text-[10.5px] uppercase tracking-[0.12em] text-[#8e918a]">AI draft intake</div>
               {selectedConversation && (
                 <DraftIntakePanel
                   conversation={selectedConversation}
@@ -840,40 +822,40 @@ function InboxPage() {
                   }}
                 />
               )}
-              <div className="border-y border-yb-line-soft bg-yb-panel-head px-[10px] py-[7px] text-[10.5px] font-bold tracking-[1.2px] text-yb-panel-head-text">CONTEXT</div>
+              <div className="border-y border-[#eeece5] px-[14px] py-[12px] font-mono text-[10.5px] uppercase tracking-[0.12em] text-[#8e918a]">Context</div>
               {selectedConversation ? (
                 selectedGroup ? (
                   <>
-                    <div className="border-b border-yb-line-row px-[14px] py-[12px]"><div className="mb-[4px] text-[10px] tracking-[1px] text-yb-muted4">CLIENT</div><Link to="/clients" className="text-[13px] font-bold text-yb-green underline">{selectedGroup.clientName}</Link><div className="mt-[3px] text-[11.5px] text-yb-muted3">Linked client record</div></div>
-                    <div className="border-b border-yb-line-row px-[14px] py-[12px]"><div className="mb-[4px] text-[10px] tracking-[1px] text-yb-muted4">ACTIVE REQUEST</div><Link to="/requests" className="text-[12.5px] font-bold text-yb-green underline">{selectedGroup.requestNumber}</Link><div className="mt-[3px] text-[11.5px] leading-[17px] text-yb-muted2">{selectedGroup.tripSummary}</div><div className="mt-[6px] inline-block border border-[#e6d9ab] bg-[#fdf1cf] px-[7px] py-px text-[10.5px] font-bold text-[#8a6d10]">Linked request</div></div>
+                    <div className="border-b border-yb-line-row px-[14px] py-[12px]"><div className="mb-[4px] text-[10px] tracking-[1px] text-yb-muted4">CLIENT</div>{canReadClients ? <Link to="/clients" className="text-[13px] font-bold text-yb-green underline">{selectedGroup.clientName}</Link> : <div className="text-[13px] font-bold">{selectedGroup.clientName}</div>}<div className="mt-[3px] text-[11.5px] text-yb-muted3">Linked client record</div></div>
+                    <div className="border-b border-yb-line-row px-[14px] py-[12px]"><div className="mb-[4px] text-[10px] tracking-[1px] text-yb-muted4">ACTIVE REQUEST</div>{can("requests.read") ? <Link to="/requests" className="text-[12.5px] font-bold text-yb-green underline">{selectedGroup.requestNumber}</Link> : <div className="text-[12.5px] font-bold">{selectedGroup.requestNumber}</div>}<div className="mt-[3px] text-[11.5px] leading-[17px] text-yb-muted2">{selectedGroup.tripSummary}</div><div className="mt-[6px] inline-block border border-[#e6d9ab] bg-[#fdf1cf] px-[7px] py-px text-[10.5px] font-bold text-[#8a6d10]">Linked request</div></div>
                     <div className="border-b border-yb-line-row px-[14px] py-[12px]">
                       <div className="mb-[6px] text-[10px] tracking-[1px] text-yb-muted4">TRAVELLERS</div>
                       {[...groupTravellers, ...groupStaff].map((participant) => <div key={`${participant.type}-${participant.entityId}`} className="flex gap-[8px] py-[3px] text-[11.5px]"><span className="min-w-0 flex-1 truncate">{participant.displayName}</span><span className="text-[10.5px] text-yb-muted4">{participant.type === "traveller" ? "Traveller" : "Staff"}</span></div>)}
                       {selectedGroup.participants.length === 0 && <div className="text-[11.5px] text-yb-muted3">No participant records available.</div>}
                     </div>
-                    <div className="px-[14px] py-[12px]"><div className="mb-[7px] text-[10px] tracking-[1px] text-yb-muted4">QUICK ACTIONS</div><div className="flex flex-col gap-[6px]"><button type="button" disabled title="Document upload is not available yet" className="border border-yb-line-btn bg-white px-[10px] py-[6px] text-left text-[11.5px] text-yb-ink2">Attach itinerary PDF</button><button type="button" onClick={() => setReply("Please send a clear photo of the passport information page.")} className="border border-yb-line-btn bg-white px-[10px] py-[6px] text-left text-[11.5px] text-yb-ink2 hover:bg-yb-row-hover">Request passport photo</button><Link to="/requests" className="border border-yb-line-btn bg-white px-[10px] py-[6px] text-[11.5px] text-yb-ink2 hover:bg-yb-row-hover">Assign to another rep</Link></div></div>
+                    {(canSend || can("requests.assign_any")) && <div className="px-[14px] py-[12px]"><div className="mb-[7px] text-[10px] tracking-[1px] text-yb-muted4">QUICK ACTIONS</div><div className="flex flex-col gap-[6px]">{canSend && <button type="button" onClick={() => setReply("Please send a clear photo of the passport information page.")} className="border border-yb-line-btn bg-white px-[10px] py-[6px] text-left text-[11.5px] text-yb-ink2 hover:bg-yb-row-hover">Request passport photo</button>}{can("requests.assign_any") && <Link to="/requests" className="border border-yb-line-btn bg-white px-[10px] py-[6px] text-[11.5px] text-yb-ink2 hover:bg-yb-row-hover">Assign to another rep</Link>}</div></div>}
                   </>
                 ) : selectedConversation.clientId && selectedConversation.clientName ? (
                   <>
                     <div className="border-b border-yb-line-row px-[14px] py-[12px]">
                       <div className="mb-[4px] text-[10px] tracking-[1px] text-yb-muted4">CLIENT</div>
-                      <Link
+                      {canReadClients ? <Link
                         to="/clients/$clientId"
                         params={{ clientId: String(selectedConversation.clientId) }}
                         className="text-[13px] font-bold text-yb-green underline"
                       >
                         {selectedConversation.clientName}
-                      </Link>
+                      </Link> : <div className="text-[13px] font-bold">{selectedConversation.clientName}</div>}
                       <div className="mt-[3px] text-[11.5px] text-yb-muted3">Linked client record</div>
                     </div>
                     <div className="border-b border-yb-line-row px-[14px] py-[12px]"><div className="mb-[4px] text-[10px] tracking-[1px] text-yb-muted4">WHATSAPP NUMBER</div><div className="text-[12px] text-yb-ink2">{displayPhone(selectedConversation.phoneNumber)}</div></div>
-                    <div className="px-[14px] py-[12px]"><div className="mb-[7px] text-[10px] tracking-[1px] text-yb-muted4">QUICK ACTIONS</div><div className="flex flex-col gap-[6px]"><Link to="/clients/$clientId" params={{ clientId: String(selectedConversation.clientId) }} className="border border-yb-line-btn bg-white px-[10px] py-[6px] text-[11.5px] text-yb-ink2 hover:bg-yb-row-hover">View client profile</Link><button type="button" onClick={() => setReply("Please send a clear photo of the passport information page.")} className="border border-yb-line-btn bg-white px-[10px] py-[6px] text-left text-[11.5px] text-yb-ink2 hover:bg-yb-row-hover">Request passport photo</button></div></div>
+                    {(canReadClients || canSend) && <div className="px-[14px] py-[12px]"><div className="mb-[7px] text-[10px] tracking-[1px] text-yb-muted4">QUICK ACTIONS</div><div className="flex flex-col gap-[6px]">{canReadClients && <Link to="/clients/$clientId" params={{ clientId: String(selectedConversation.clientId) }} className="border border-yb-line-btn bg-white px-[10px] py-[6px] text-[11.5px] text-yb-ink2 hover:bg-yb-row-hover">View client profile</Link>}{canSend && <button type="button" onClick={() => setReply("Please send a clear photo of the passport information page.")} className="border border-yb-line-btn bg-white px-[10px] py-[6px] text-left text-[11.5px] text-yb-ink2 hover:bg-yb-row-hover">Request passport photo</button>}</div></div>}
                   </>
                 ) : (
                   <>
                     <div className="border-b border-yb-line-row px-[14px] py-[12px]"><div className="mb-[4px] text-[10px] tracking-[1px] text-yb-muted4">CLIENT</div><div className="text-[13px] font-bold text-yb-ink2">Not linked</div><div className="mt-[4px] text-[11.5px] leading-[17px] text-yb-muted3">This direct conversation is not yet connected to a client or travel request.</div></div>
                     <div className="border-b border-yb-line-row px-[14px] py-[12px]"><div className="mb-[4px] text-[10px] tracking-[1px] text-yb-muted4">WHATSAPP NUMBER</div><div className="text-[12px] text-yb-ink2">{displayPhone(selectedConversation.phoneNumber)}</div></div>
-                    <div className="px-[14px] py-[12px]"><div className="mb-[7px] text-[10px] tracking-[1px] text-yb-muted4">QUICK ACTIONS</div><div className="flex flex-col gap-[6px]"><Link to="/clients" search={{ newClient: true, name: selectedConversation.displayName ?? "", whatsappNumber: selectedConversation.phoneNumber, conversationId: selectedConversation.id }} className="border border-yb-line-btn bg-white px-[10px] py-[6px] text-[11.5px] text-yb-ink2 hover:bg-yb-row-hover">Link to a client</Link><button type="button" onClick={() => setReply("Please send a clear photo of the passport information page.")} className="border border-yb-line-btn bg-white px-[10px] py-[6px] text-left text-[11.5px] text-yb-ink2 hover:bg-yb-row-hover">Request passport photo</button></div></div>
+                    {(canCreateClient || canSend) && <div className="px-[14px] py-[12px]"><div className="mb-[7px] text-[10px] tracking-[1px] text-yb-muted4">QUICK ACTIONS</div><div className="flex flex-col gap-[6px]">{canCreateClient && <Link to="/clients" search={{ newClient: true, name: selectedConversation.displayName ?? "", whatsappNumber: selectedConversation.phoneNumber, conversationId: selectedConversation.id }} className="border border-yb-line-btn bg-white px-[10px] py-[6px] text-[11.5px] text-yb-ink2 hover:bg-yb-row-hover">Link to a client</Link>}{canSend && <button type="button" onClick={() => setReply("Please send a clear photo of the passport information page.")} className="border border-yb-line-btn bg-white px-[10px] py-[6px] text-left text-[11.5px] text-yb-ink2 hover:bg-yb-row-hover">Request passport photo</button>}</div></div>}
                   </>
                 )
               ) : (
@@ -889,6 +871,7 @@ function InboxPage() {
 }
 
 type DraftFormState = {
+  bookingChoice: string;
   requestTypeId: string;
   urgencyLevelId: string;
   summary: string;
@@ -903,6 +886,9 @@ type DraftFormState = {
 
 function draftToForm(draft: DraftIntakeRecord): DraftFormState {
   return {
+    bookingChoice: draft.bookingResolution === "matched" && draft.matchedTravelRequestId
+      ? `booking:${draft.matchedTravelRequestId}`
+      : draft.bookingResolution === "new_booking" ? "new" : "",
     requestTypeId: draft.requestTypeId ? String(draft.requestTypeId) : "",
     urgencyLevelId: draft.urgencyLevelId ? String(draft.urgencyLevelId) : "",
     summary: draft.summary,
@@ -916,6 +902,47 @@ function draftToForm(draft: DraftIntakeRecord): DraftFormState {
   };
 }
 
+/**
+ * Converts the employee's reviewed fields and booking choice into the API
+ * payload. A blank choice remains ambiguous and therefore cannot be applied
+ * until the employee chooses an open booking or a separate booking.
+ */
+function draftFormToInput(form: DraftFormState): UpdateDraftIntakeInput {
+  const matchedId = form.bookingChoice.startsWith("booking:")
+    ? Number(form.bookingChoice.slice("booking:".length))
+    : null;
+  return {
+    requestTypeId: Number(form.requestTypeId),
+    urgencyLevelId: Number(form.urgencyLevelId),
+    summary: form.summary,
+    passengerCount: form.passengerCount ? Number(form.passengerCount) : null,
+    origin: form.origin || null,
+    destination: form.destination || null,
+    departureDateText: form.departureDateText || null,
+    returnDateText: form.returnDateText || null,
+    missingInformation: form.missingInformation.split("\n").map((item) => item.trim()).filter(Boolean),
+    suggestedReply: form.suggestedReply || null,
+    bookingResolution: matchedId ? "matched" : form.bookingChoice === "new" ? "new_booking" : "ambiguous",
+    matchedTravelRequestId: matchedId,
+  };
+}
+
+/**
+ * Shows each booking only once even when several approved customer messages
+ * were applied to the same booking over time.
+ */
+function uniqueConversationRequests(drafts: DraftIntakeRecord[]): DraftIntakeRecord[] {
+  const seenRequestIds = new Set<number>();
+  return drafts.filter((draft) => {
+    if (draft.status !== "approved" || draft.travelRequestId === null || draft.travelRequestNumber === null) {
+      return false;
+    }
+    if (seenRequestIds.has(draft.travelRequestId)) return false;
+    seenRequestIds.add(draft.travelRequestId);
+    return true;
+  });
+}
+
 function DraftIntakePanel({
   conversation,
   onUseReply,
@@ -923,6 +950,11 @@ function DraftIntakePanel({
   conversation: ConversationSummary;
   onUseReply: (value: string) => void;
 }) {
+  const { can } = useAuth();
+  const canUpdateRequests = can("requests.update");
+  const canCreateRequests = can("requests.create");
+  const canReadRequests = can("requests.read");
+  const canSendReply = can("whatsapp.send");
   const queryClient = useQueryClient();
   const queryKey = ["messaging", "conversations", conversation.id, "draft-intakes"] as const;
   const [form, setForm] = useState<DraftFormState | null>(null);
@@ -935,14 +967,10 @@ function DraftIntakePanel({
   const workflowQuery = useQuery({
     queryKey: ["request-workflow-settings", "active"],
     queryFn: requestWorkflowSettingsApi.listActive,
+    enabled: canUpdateRequests,
   });
   const latest = draftsQuery.data?.[0] ?? null;
-  const conversationRequests = (draftsQuery.data ?? []).filter(
-    (draft) =>
-      draft.status === "approved" &&
-      draft.travelRequestId !== null &&
-      draft.travelRequestNumber !== null,
-  );
+  const conversationRequests = uniqueConversationRequests(draftsQuery.data ?? []);
 
   useEffect(() => {
     setForm(latest?.status === "pending" ? draftToForm(latest) : null);
@@ -969,49 +997,48 @@ function DraftIntakePanel({
     onSuccess: refresh,
   });
   const createMutation = useMutation({
-    mutationFn: () => messagingApi.createRequestFromDraft(latest!.id),
+    mutationFn: async (input: UpdateDraftIntakeInput) => {
+      await messagingApi.updateDraftIntake(latest!.id, input);
+      return messagingApi.createRequestFromDraft(latest!.id);
+    },
     onSuccess: refresh,
   });
-  const mutationError = analyzeMutation.error ?? updateMutation.error ?? rejectMutation.error ?? createMutation.error;
-  const busy = analyzeMutation.isPending || updateMutation.isPending || rejectMutation.isPending || createMutation.isPending;
+  const applyMutation = useMutation({
+    mutationFn: async (input: UpdateDraftIntakeInput) => {
+      await messagingApi.updateDraftIntake(latest!.id, input);
+      return messagingApi.applyDraftToBooking(latest!.id);
+    },
+    onSuccess: refresh,
+  });
+  const mutationError = analyzeMutation.error ?? updateMutation.error ?? rejectMutation.error ?? createMutation.error ?? applyMutation.error;
+  const busy = analyzeMutation.isPending || updateMutation.isPending || rejectMutation.isPending || createMutation.isPending || applyMutation.isPending;
 
   const updateField = (field: keyof DraftFormState, value: string) =>
     setForm((current) => current ? { ...current, [field]: value } : current);
 
   const save = () => {
     if (!form) return;
-    updateMutation.mutate({
-      requestTypeId: Number(form.requestTypeId),
-      urgencyLevelId: Number(form.urgencyLevelId),
-      summary: form.summary,
-      passengerCount: form.passengerCount ? Number(form.passengerCount) : null,
-      origin: form.origin || null,
-      destination: form.destination || null,
-      departureDateText: form.departureDateText || null,
-      returnDateText: form.returnDateText || null,
-      missingInformation: form.missingInformation.split("\n").map((item) => item.trim()).filter(Boolean),
-      suggestedReply: form.suggestedReply || null,
-    });
+    updateMutation.mutate(draftFormToInput(form));
   };
 
   if (draftsQuery.isLoading) {
-    return <div className="px-[14px] py-[16px] text-[11.5px] text-yb-muted3">Checking for an AI draft…</div>;
+    return <div className="px-[14px] py-[16px] text-[12.5px] text-[#8e918a]">Checking for an AI draft…</div>;
   }
 
   if (!latest) {
     return (
-      <div className="px-[14px] py-[13px]">
-        <div className="text-[12px] font-bold text-yb-ink2">No draft intake yet</div>
-        <p className="mt-[4px] text-[11.5px] leading-[17px] text-yb-muted3">
+      <div className="px-[14px] py-[14px]">
+        <div className="text-[12.5px] font-semibold text-[#1b1e1c]">No draft intake yet</div>
+        <p className="mt-[5px] text-[12.5px] leading-[1.55] text-[#5d615b]">
           New travel messages are analyzed automatically. You can also analyze the latest incoming message now.
         </p>
-        <PrimaryButton
-          className="mt-[9px] h-[29px] w-full rounded-none px-[10px] text-[11.5px]"
+        {canUpdateRequests && <PrimaryButton
+          className="mt-[12px] h-[34px] w-full rounded-[9px] border-[#0d2f24] bg-[#0d2f24] px-[10px] text-[12.5px] font-semibold"
           disabled={analyzeMutation.isPending}
           onClick={() => analyzeMutation.mutate()}
         >
           {analyzeMutation.isPending ? "Analyzing…" : "Analyze latest message"}
-        </PrimaryButton>
+        </PrimaryButton>}
         {notice && <p className="mt-[7px] text-[11px] leading-[15px] text-yb-muted3">{notice}</p>}
         {mutationError && <DraftError error={mutationError} />}
       </div>
@@ -1020,13 +1047,13 @@ function DraftIntakePanel({
 
   if (latest.status === "failed") {
     return (
-      <div className="px-[14px] py-[13px]">
-        <div className="border border-[#e7c7c1] bg-[#fff4f1] px-[9px] py-[8px] text-[11.5px] text-yb-red">
+      <div className="px-[14px] py-[14px]">
+        <div className="rounded-[9px] border border-[#e7c7c1] bg-[#fff4f1] px-[11px] py-[10px] text-[12.5px] leading-[1.5] text-yb-red">
           <strong>Analysis failed.</strong> {latest.analysisError ?? "The AI provider could not analyze this message."}
         </div>
-        <PrimaryButton className="mt-[9px] h-[29px] w-full rounded-none text-[11.5px]" disabled={busy} onClick={() => analyzeMutation.mutate()}>
+        {canUpdateRequests && <PrimaryButton className="mt-[12px] h-[34px] w-full rounded-[9px] text-[12.5px]" disabled={busy} onClick={() => analyzeMutation.mutate()}>
           {analyzeMutation.isPending ? "Retrying…" : "Retry analysis"}
-        </PrimaryButton>
+        </PrimaryButton>}
         {mutationError && <DraftError error={mutationError} />}
         <ConversationRequestHistory requests={conversationRequests} />
       </div>
@@ -1035,10 +1062,10 @@ function DraftIntakePanel({
 
   if (latest.status === "approved") {
     return (
-      <div className="px-[14px] py-[13px]">
-        <div className="border border-[#b9d2c1] bg-[#edf7f0] px-[9px] py-[8px] text-[11.5px] text-yb-green">
-          <strong>Request created.</strong>
-          {latest.travelRequestNumber && latest.travelRequestId && (
+      <div className="px-[14px] py-[14px]">
+        <div className="rounded-[9px] border border-[#b9d2c1] bg-[#edf7f0] px-[11px] py-[10px] text-[12.5px] leading-[1.5] text-yb-green">
+          <strong>{latest.bookingResolution === "matched" ? "Information added to booking." : "Separate booking created."}</strong>
+          {canReadRequests && latest.travelRequestNumber && latest.travelRequestId && (
             <Link
               to="/requests/$requestId"
               params={{ requestId: String(latest.travelRequestId) }}
@@ -1048,7 +1075,13 @@ function DraftIntakePanel({
             </Link>
           )}
         </div>
-        <div className="mt-[8px] text-[11.5px] leading-[16px] text-yb-ink2">{latest.summary}</div>
+        <div className="mt-[10px] text-[12.5px] leading-[1.55] text-[#3d423c]">{latest.summary}</div>
+        {canUpdateRequests && <SecondaryButton className="mt-[12px] h-[34px] w-full rounded-[9px] border-[#ddd9cf] px-[8px] text-[12px] font-semibold" disabled={busy} onClick={() => analyzeMutation.mutate()}>
+          {analyzeMutation.isPending ? "Regenerating…" : "Regenerate draft from latest message"}
+        </SecondaryButton>}
+        <div className="mt-[6px] text-[11px] leading-[15px] text-[#8e918a]">
+          Use this when the latest message was attached to the wrong booking. The existing booking record is not deleted.
+        </div>
         <ConversationRequestHistory requests={conversationRequests} />
       </div>
     );
@@ -1056,22 +1089,28 @@ function DraftIntakePanel({
 
   if (latest.status === "rejected") {
     return (
-      <div className="px-[14px] py-[13px]">
-        <div className="border border-yb-line-row bg-white px-[9px] py-[8px] text-[11.5px] text-yb-muted3">
+      <div className="px-[14px] py-[14px]">
+        <div className="rounded-[9px] border border-[#e6e3da] bg-white px-[11px] py-[10px] text-[12.5px] leading-[1.55] text-[#5d615b]">
           This AI draft was rejected{latest.reviewedByName ? ` by ${latest.reviewedByName}` : ""}. No request was created.
         </div>
-        <PrimaryButton className="mt-[9px] h-[29px] w-full rounded-none text-[11.5px]" disabled={busy} onClick={() => analyzeMutation.mutate()}>
+        {canUpdateRequests && <PrimaryButton className="mt-[12px] h-[34px] w-full rounded-[9px] border-[#0d2f24] bg-[#0d2f24] text-[12.5px] font-semibold" disabled={busy} onClick={() => analyzeMutation.mutate()}>
           Analyze latest message
-        </PrimaryButton>
+        </PrimaryButton>}
         <ConversationRequestHistory requests={conversationRequests} />
       </div>
     );
   }
 
+  if (!canUpdateRequests) {
+    return <div className="px-[14px] py-[14px]"><div className="text-[12.5px] font-semibold">Draft awaiting review</div><p className="mt-[5px] text-[12px] leading-[18px] text-yb-muted3">You can read this conversation, but reviewing or changing its intake draft requires request update permission.</p><ConversationRequestHistory requests={conversationRequests} /></div>;
+  }
   if (!form) return null;
   const inputClass = "mt-[3px] h-[27px] w-full border border-[#9aa29a] bg-white px-[6px] text-[11.5px] outline-none focus:border-yb-green";
   const labelClass = "block text-[9.5px] font-bold tracking-[.7px] text-yb-muted4";
   const valid = Boolean(form.requestTypeId && form.urgencyLevelId && form.summary.trim().length >= 3);
+  const bookingSelected = Boolean(form.bookingChoice);
+  const selectedExistingBooking = form.bookingChoice.startsWith("booking:");
+  const hasLinkedClientContext = Boolean(conversation.clientId || latest.openBookings.length > 0);
 
   return (
     <div className="px-[12px] py-[11px]">
@@ -1079,6 +1118,35 @@ function DraftIntakePanel({
         <span className="border border-[#dfc269] bg-[#fff3c9] px-[6px] py-[2px] text-[10px] font-bold text-[#765c08]">PENDING REVIEW</span>
         <span className="flex-1" />
         <span className="text-[10.5px] text-yb-muted3">{latest.confidence ?? 0}% confidence</span>
+      </div>
+      <div className="mb-[9px] border border-yb-line-row bg-white px-[8px] py-[7px]">
+        <label className={labelClass}>WHICH BOOKING DOES THIS INFORMATION RELATE TO?
+          <select
+            className={inputClass}
+            value={form.bookingChoice}
+            onChange={(event) => updateField("bookingChoice", event.target.value)}
+          >
+            <option value="">Choose an open booking…</option>
+            {latest.openBookings.map((booking) => (
+              <option key={booking.id} value={`booking:${booking.id}`}>
+                {booking.requestNumber} · {booking.summary}
+              </option>
+            ))}
+            <option value="new">Create a separate booking</option>
+          </select>
+        </label>
+        {latest.bookingResolution === "new_booking" && (
+          <div className="mt-[6px] text-[10.5px] font-bold leading-[14px] text-[#8a6d10]">
+            This looks like a new booking. Confirm the separate-booking option before creating it.
+          </div>
+        )}
+        {latest.bookingResolution === "ambiguous" && (
+          <div className="mt-[6px] text-[10.5px] font-bold leading-[14px] text-[#8a6d10]">
+            The system could not identify one booking confidently. Please choose the correct open booking.
+          </div>
+        )}
+        {latest.bookingMatchReason && <div className="mt-[5px] text-[10.5px] leading-[14px] text-yb-muted3">{latest.bookingMatchReason}</div>}
+        {latest.dateInferenceNote && <div className="mt-[5px] text-[10.5px] leading-[14px] text-yb-muted3">{latest.dateInferenceNote}</div>}
       </div>
       <div className="grid grid-cols-2 gap-[7px]">
         <label className={labelClass}>REQUEST TYPE
@@ -1113,13 +1181,20 @@ function DraftIntakePanel({
         <textarea rows={7} className="mt-[3px] min-h-[125px] w-full resize-y border border-[#9aa29a] bg-white px-[8px] py-[7px] text-[11.5px] leading-[17px] outline-none focus:border-yb-green" value={form.suggestedReply} onChange={(event) => updateField("suggestedReply", event.target.value)} />
       </label>
       <div className="mt-[5px] text-[10.5px] leading-[14px] text-yb-muted3">AI prepares this draft. An employee must review it before anything is sent or created.</div>
+      <SecondaryButton className="mt-[9px] h-[29px] w-full rounded-none px-[8px] text-[11px]" disabled={busy} onClick={() => analyzeMutation.mutate()}>
+        {analyzeMutation.isPending ? "Regenerating…" : "Regenerate draft from latest message"}
+      </SecondaryButton>
       <div className="mt-[9px] grid grid-cols-2 gap-[6px]">
         <SecondaryButton className="h-[29px] rounded-none px-[8px] text-[11px]" disabled={busy || !valid} onClick={save}>{updateMutation.isPending ? "Saving…" : "Save edits"}</SecondaryButton>
-        <SecondaryButton className="h-[29px] rounded-none px-[8px] text-[11px]" disabled={busy || !form.suggestedReply.trim()} onClick={() => onUseReply(form.suggestedReply)}>Use reply</SecondaryButton>
+        {canSendReply && <SecondaryButton className="h-[29px] rounded-none px-[8px] text-[11px]" disabled={busy || !form.suggestedReply.trim()} onClick={() => onUseReply(form.suggestedReply)}>Use reply</SecondaryButton>}
         <button type="button" className="h-[29px] border border-[#ba7770] bg-white px-[8px] text-[11px] font-bold text-yb-red hover:bg-[#fff4f1] disabled:opacity-50" disabled={busy} onClick={() => rejectMutation.mutate()}>{rejectMutation.isPending ? "Rejecting…" : "Reject draft"}</button>
-        <PrimaryButton className="h-[29px] rounded-none px-[8px] text-[11px]" disabled={busy || !valid || !conversation.clientId} onClick={() => createMutation.mutate()}>{createMutation.isPending ? "Creating…" : "Create request"}</PrimaryButton>
+        {selectedExistingBooking ? (
+          <PrimaryButton className="h-[29px] rounded-none px-[8px] text-[11px]" disabled={busy || !valid || !bookingSelected || !hasLinkedClientContext} onClick={() => applyMutation.mutate(draftFormToInput(form))}>{applyMutation.isPending ? "Applying…" : "Apply to booking"}</PrimaryButton>
+        ) : canCreateRequests ? (
+          <PrimaryButton className="h-[29px] rounded-none px-[8px] text-[11px]" disabled={busy || !valid || form.bookingChoice !== "new" || !hasLinkedClientContext} onClick={() => createMutation.mutate(draftFormToInput(form))}>{createMutation.isPending ? "Creating…" : "Create separate booking"}</PrimaryButton>
+        ) : <div className="px-[5px] text-[10.5px] leading-[14px] text-[#8a6d10]">Creating a separate booking requires request create permission.</div>}
       </div>
-      {!conversation.clientId && <div className="mt-[6px] text-[10.5px] leading-[14px] text-[#8a6d10]">Link this conversation to a client before creating the request.</div>}
+      {!hasLinkedClientContext && <div className="mt-[6px] text-[10.5px] leading-[14px] text-[#8a6d10]">Link this conversation to a client before creating or updating a booking.</div>}
       {mutationError && <DraftError error={mutationError} />}
       <ConversationRequestHistory requests={conversationRequests} />
     </div>
@@ -1127,37 +1202,38 @@ function DraftIntakePanel({
 }
 
 function ConversationRequestHistory({ requests }: { requests: DraftIntakeRecord[] }) {
+  const { can } = useAuth();
   if (requests.length === 0) return null;
 
   return (
-    <section className="mt-[12px] border-t border-yb-line-row pt-[10px]" aria-label="Requests in this conversation">
-      <div className="flex items-center gap-[6px] text-[9.5px] font-bold tracking-[.7px] text-yb-muted4">
-        <span>REQUESTS IN THIS CONVERSATION</span>
+    <section className="mt-[14px] border-t border-[#eeece5] pt-[14px]" aria-label="Requests in this conversation">
+      <div className="flex items-center gap-[6px] font-mono text-[10.5px] uppercase tracking-[0.12em] text-[#8e918a]">
+        <span>Requests</span>
         <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#e5ebe5] px-[5px] text-[10px] tracking-normal text-yb-green">
           {requests.length}
         </span>
       </div>
-      <div className="mt-[7px] flex flex-col gap-[6px]">
+      <div className="mt-[10px] flex flex-col gap-[8px]">
         {requests.map((request) => (
-          <Link
+          can("requests.read") ? <Link
             key={request.id}
             to="/requests/$requestId"
             params={{ requestId: String(request.travelRequestId) }}
-            className="block border border-yb-line-btn bg-white px-[9px] py-[8px] text-yb-ink2 hover:border-yb-green hover:bg-yb-row-hover"
+            className="block rounded-[11px] border border-[#e6e3da] bg-white px-[12px] py-[11px] text-[#3d423c] hover:border-[#c3bfb2] hover:shadow-[0_1px_3px_rgba(20,25,20,0.06)]"
           >
             <div className="flex items-start gap-[8px]">
-              <strong className="text-[12px] text-yb-green underline">{request.travelRequestNumber}</strong>
+              <strong className="font-mono text-[12.5px] font-medium text-[#0d4030] underline">{request.travelRequestNumber}</strong>
               <span className="flex-1" />
-              <span className="text-right text-[10px] text-yb-muted4">
+              <span className="text-right text-[11px] text-[#9a9d96]">
                 {new Date(request.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })}
               </span>
             </div>
-            <div className="mt-[3px] text-[11px] leading-[15px]">{request.summary}</div>
-            <div className="mt-[5px] flex flex-wrap gap-x-[8px] gap-y-[2px] text-[10px] text-yb-muted3">
-              {request.requestTypeName && <span>{request.requestTypeName}</span>}
-              {request.urgencyName && <span>Urgency: {request.urgencyName}</span>}
+            <div className="mt-[6px] text-[12.5px] leading-[1.5]">{request.summary}</div>
+            <div className="mt-[9px] flex flex-wrap gap-[6px] text-[10.5px] font-medium">
+              {request.requestTypeName && <span className="rounded-[5px] bg-[#eef3ef] px-[7px] py-[2px] text-[#3d5c4d]">{request.requestTypeName}</span>}
+              {request.urgencyName && <span className="rounded-[5px] bg-[#f4f2ec] px-[7px] py-[2px] text-[#6b6f69]">{request.urgencyName} urgency</span>}
             </div>
-          </Link>
+          </Link> : <div key={request.id} className="block rounded-[11px] border border-[#e6e3da] bg-white px-[12px] py-[11px] text-[#3d423c]"><strong className="font-mono text-[12.5px] font-medium">{request.travelRequestNumber}</strong><div className="mt-[6px] text-[12.5px] leading-[1.5]">{request.summary}</div></div>
         ))}
       </div>
     </section>

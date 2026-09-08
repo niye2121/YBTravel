@@ -11,10 +11,9 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { z, ZodError } from "zod";
-import { AdminGuard } from "../auth/admin.guard";
 import { AuthGuard, type AuthenticatedRequest } from "../auth/auth.guard";
-import { AllowedRoles } from "../auth/allowed-roles.decorator";
-import { RoleGuard } from "../auth/role.guard";
+import { AllowedPermissions } from "../auth/allowed-permissions.decorator";
+import { PermissionGuard } from "../auth/permission.guard";
 import {
   MessageTemplatesService,
   type MessageTemplate,
@@ -46,29 +45,30 @@ function parseInput(body: unknown): MessageTemplateInput {
 }
 
 @Controller("message-templates")
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, PermissionGuard)
 export class MessageTemplatesController {
   constructor(private readonly messageTemplatesService: MessageTemplatesService) {}
 
   @Get()
+  @AllowedPermissions("templates.read")
   listActive(): Promise<MessageTemplate[]> {
     return this.messageTemplatesService.list(true);
   }
 
   @Get("admin")
-  @UseGuards(AdminGuard)
+  @AllowedPermissions("settings.manage")
   listAll(): Promise<MessageTemplate[]> {
     return this.messageTemplatesService.list(false);
   }
 
   @Post()
-  @UseGuards(AdminGuard)
+  @AllowedPermissions("settings.manage")
   create(@Req() request: AuthenticatedRequest, @Body() body: unknown): Promise<MessageTemplate> {
     return this.messageTemplatesService.create(parseInput(body), request.user.id);
   }
 
   @Patch(":id")
-  @UseGuards(AdminGuard)
+  @AllowedPermissions("settings.manage")
   update(
     @Param("id", ParseIntPipe) id: number,
     @Req() request: AuthenticatedRequest,
@@ -78,8 +78,7 @@ export class MessageTemplatesController {
   }
 
   @Post(":id/render")
-  @UseGuards(RoleGuard)
-  @AllowedRoles("offshore_intake_employee", "travel_agent", "system_administrator")
+  @AllowedPermissions("templates.use")
   render(@Param("id", ParseIntPipe) id: number, @Body() body: unknown) {
     try { return this.messageTemplatesService.render(id, renderSchema.parse(body).conversationId); }
     catch (error) { if (error instanceof ZodError) throw new BadRequestException(error.flatten().fieldErrors); throw error; }

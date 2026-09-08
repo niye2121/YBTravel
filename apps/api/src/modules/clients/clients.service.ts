@@ -248,15 +248,6 @@ export class ClientsService {
       if ((stageResult.rowCount ?? 0) === 0) {
         throw new BadRequestException("Select an active onboarding stage");
       }
-      await this.onboarding.applyStageTransition(
-        dbClient,
-        id,
-        beforeRow.stage,
-        input.stage,
-        input.onboardingTransitionReason ?? null,
-        actorUserId,
-      );
-
       await dbClient.query(
         `UPDATE clients
          SET name = $2, client_type = $3, phone_number = $4,
@@ -273,6 +264,17 @@ export class ClientsService {
           input.bookingFeeGroupId,
           input.stage,
         ],
+      );
+
+      // Validate against the submitted profile values, not the previous ones.
+      // A rejected transition rolls the profile update back in this transaction.
+      await this.onboarding.applyStageTransition(
+        dbClient,
+        id,
+        beforeRow.stage,
+        input.stage,
+        input.onboardingTransitionReason ?? null,
+        actorUserId,
       );
 
       const afterResult = await dbClient.query<ClientRow>(`${SELECT_CLIENT} WHERE c.id = $1`, [id]);

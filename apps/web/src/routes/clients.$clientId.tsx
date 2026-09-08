@@ -1,14 +1,22 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, redirect } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { Client, TravellerRelationship } from "@yb-travel/shared";
 import { AppHeader } from "../components/AppShell/AppHeader";
 import { PrimaryButton, SecondaryButton } from "../components/AppShell/buttons";
 import { bookingFeesApi, clientsApi, travellersApi, workflowSettingsApi } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
 import { EntityRecordsPanel } from "../components/EntityRecordsPanel";
+import { ClientNewRequest } from "../components/ClientNewRequest";
+import { useAuth } from "../lib/AuthContext";
+import { getStoredUser, hasPermission } from "../lib/session";
 
-export const Route = createFileRoute("/clients/$clientId")({ component: ClientDetailPage });
+export const Route = createFileRoute("/clients/$clientId")({
+  beforeLoad: () => {
+    if (!hasPermission(getStoredUser(), "clients.read")) throw redirect({ to: "/" });
+  },
+  component: ClientDetailPage,
+});
 
 type AddMode = "new" | "existing";
 
@@ -41,7 +49,7 @@ const RELATIONSHIP_LABELS: Record<TravellerRelationship, string> = {
 
 const relationships = Object.keys(RELATIONSHIP_LABELS) as TravellerRelationship[];
 const controlClass =
-  "h-[30px] w-full border border-[#8d968e] bg-white px-[8px] text-[13px] text-[#1c1f1b] outline-none focus:border-[#1a6b46] focus:ring-1 focus:ring-[#1a6b46]";
+  "h-[30px] w-full border border-yb-line-btn bg-white px-[8px] text-[13px] text-yb-ink outline-none focus:border-[#1a6b46] focus:ring-1 focus:ring-[#1a6b46]";
 
 const CLIENT_TYPES: Array<{ value: Client["clientType"]; label: string }> = [
   { value: "household", label: "Household" },
@@ -90,6 +98,15 @@ function FormField({ label, required, children }: { label: string; required?: bo
 }
 
 function ClientDetailPage() {
+  const { can } = useAuth();
+  const canUpdateClient = can("clients.update");
+  const canReadFees = can("fees.read");
+  const canReadOnboarding = can("onboarding.read");
+  const canManageOnboarding = can("onboarding.manage");
+  const canReadTravellers = can("travellers.read");
+  const canCreateTraveller = can("travellers.create");
+  const canLinkTraveller = can("travellers.link") && canReadTravellers;
+  const canAddTraveller = canCreateTraveller || canLinkTraveller;
   const { clientId: clientIdParam } = Route.useParams();
   const clientId = Number(clientIdParam);
   const queryClient = useQueryClient();
@@ -97,6 +114,8 @@ function ClientDetailPage() {
   const [showEditClient, setShowEditClient] = useState(false);
   const [editState, setEditState] = useState<ClientEditState | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
+  const [reasonError, setReasonError] = useState(false);
+  const reasonInput = useRef<HTMLTextAreaElement>(null);
   const [showAddTraveller, setShowAddTraveller] = useState(false);
   const [addMode, setAddMode] = useState<AddMode>("new");
   const [legalName, setLegalName] = useState("");
@@ -108,18 +127,18 @@ function ClientDetailPage() {
 
   const clientsQuery = useQuery({ queryKey: ["clients"], queryFn: clientsApi.list });
   const repsQuery = useQuery({ queryKey: ["clients", "reps"], queryFn: clientsApi.listReps });
-  const feeGroupsQuery = useQuery({ queryKey: ["booking-fees", "active"], queryFn: bookingFeesApi.listActive });
-  const workflowQuery = useQuery({ queryKey: ["workflow-settings", "active"], queryFn: workflowSettingsApi.listActive });
-  const travellersQuery = useQuery({ queryKey: ["travellers"], queryFn: travellersApi.list });
+  const feeGroupsQuery = useQuery({ queryKey: ["booking-fees", "active"], queryFn: bookingFeesApi.listActive, enabled: canUpdateClient && canReadFees });
+  const workflowQuery = useQuery({ queryKey: ["workflow-settings", "active"], queryFn: workflowSettingsApi.listActive, enabled: canUpdateClient && canReadOnboarding });
+  const travellersQuery = useQuery({ queryKey: ["travellers"], queryFn: travellersApi.list, enabled: canReadTravellers });
   const clientTravellersQuery = useQuery({
     queryKey: ["clients", clientId, "travellers"],
     queryFn: () => clientsApi.listTravellers(clientId),
-    enabled: Number.isInteger(clientId) && clientId > 0,
+    enabled: Number.isInteger(clientId) && clientId > 0 && canReadTravellers,
   });
   const onboardingQuery = useQuery({
     queryKey: ["clients", clientId, "onboarding-status"],
     queryFn: () => clientsApi.getOnboardingStatus(clientId),
-    enabled: Number.isInteger(clientId) && clientId > 0,
+    enabled: Number.isInteger(clientId) && clientId > 0 && canReadOnboarding,
   });
 
   const client = clientsQuery.data?.find((item) => item.id === clientId);
@@ -156,6 +175,7 @@ function ClientDetailPage() {
   }
 
   function closeEditClient() {
+    setReasonError(false);
     setShowEditClient(false);
     setEditState(null);
     setEditError(null);
@@ -255,6 +275,16 @@ function ClientDetailPage() {
       setEditError("Select an onboarding stage");
       return;
     }
+    const stages = [...(workflowQuery.data?.stages ?? [])].sort((a, b) => a.position - b.position || a.id - b.id);
+    const fromIndex = stages.findIndex((stage) => stage.code === client?.stage);
+    const toIndex = stages.findIndex((stage) => stage.code === editState.stage);
+    if (fromIndex >= 0 && toIndex >= 0 && toIndex < fromIndex && !editState.onboardingTransitionReason.trim()) {
+      setReasonError(true);
+      reasonInput.current?.focus({ preventScroll: true });
+      reasonInput.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    setReasonError(false);
     updateClientMutation.mutate(editState);
   }
 
@@ -267,6 +297,7 @@ function ClientDetailPage() {
       return;
     }
     if (addMode === "new") {
+      if (!canCreateTraveller) return;
       if (!legalName.trim() || !dob) {
         setError("Legal name and date of birth are required");
         return;
@@ -279,6 +310,7 @@ function ClientDetailPage() {
       });
       return;
     }
+    if (!canLinkTraveller) return;
     if (!existingTravellerId) {
       setError("Choose an existing traveller");
       return;
@@ -289,7 +321,7 @@ function ClientDetailPage() {
   const addPending = createTravellerMutation.isPending || linkTravellerMutation.isPending;
 
   return (
-    <div className="yb-reference-scale min-h-screen min-w-[1180px] bg-[#eef0ea] font-[Helvetica,Arial,sans-serif] leading-[1.25] text-[#1c1f1b]">
+    <div className="min-h-screen min-w-[1180px] bg-yb-canvas font-sans leading-[1.25] text-yb-ink">
       <AppHeader tabs={NAV_TABS} query={query} onQueryChange={setQuery} compact />
 
       <main className="px-[16px] pt-[14px] pb-[40px]">
@@ -302,14 +334,14 @@ function ClientDetailPage() {
         </div>
 
         {clientsQuery.isLoading && (
-          <div className="border border-[#c3cbc2] bg-white p-[24px] text-[13px] text-[#6c766f]">
+          <div className="border border-yb-line bg-white p-[24px] text-[13px] text-[#6c766f]">
             Loading client…
           </div>
         )}
 
         {!clientsQuery.isLoading && (!Number.isInteger(clientId) || !client) && (
-          <div className="border border-[#c3cbc2] bg-white p-[24px]">
-            <h1 className="mb-[6px] text-[22px] font-bold">Client not found</h1>
+          <div className="border border-yb-line bg-white p-[24px]">
+            <h1 className="mb-[6px] yb-page-title">Client not found</h1>
             <p className="mb-[14px] text-[13px] text-[#6c766f]">This client may no longer exist.</p>
             <Link to="/clients" search={{}} className="text-[13px] font-bold text-[#0b5c3b] underline">
               Return to Clients
@@ -326,7 +358,7 @@ function ClientDetailPage() {
               <div>
                 <div className="text-[10px] uppercase tracking-[0.14em] text-[#6c766f]">Client</div>
                 <div className="flex items-baseline gap-[8px]">
-                  <h1 className="text-[24px] font-bold tracking-[-0.01em]">{client.name}</h1>
+                  <h1 className="yb-page-title">{client.name}</h1>
                   <span className="text-[12px] text-[#6c766f]">{client.stageName}</span>
                   {client.isDemo && (
                     <span className="border border-[#d3b35a] bg-[#fff7d8] px-[6px] py-[2px] text-[9px] font-bold text-[#7b5b00]">
@@ -336,7 +368,10 @@ function ClientDetailPage() {
                 </div>
               </div>
               <div className="flex-1" />
-              {!client.isDemo && (
+              {!client.isDemo && can("requests.create") && can("requests.read") && (
+                <ClientNewRequest key={client.id} clientId={client.id} clientName={client.name} />
+              )}
+              {!client.isDemo && canUpdateClient && canReadFees && canReadOnboarding && (
                 <SecondaryButton
                   className="h-[30px] px-[14px] text-[12px]"
                   onClick={() => (showEditClient ? closeEditClient() : openEditClient(client))}
@@ -344,14 +379,16 @@ function ClientDetailPage() {
                   {showEditClient ? "Cancel Edit" : "Edit Client"}
                 </SecondaryButton>
               )}
-              <PrimaryButton className="h-[30px] px-[14px] text-[12px]" disabled={client.isDemo} onClick={() => { setShowAddTraveller(true); setNotice(null); }}>
-                + Add Traveller
-              </PrimaryButton>
+              {canAddTraveller && (
+                <PrimaryButton className="h-[30px] px-[14px] text-[12px]" disabled={client.isDemo} onClick={() => { setAddMode(canCreateTraveller ? "new" : "existing"); setShowAddTraveller(true); setNotice(null); }}>
+                  + Add Traveller
+                </PrimaryButton>
+              )}
             </header>
 
             {showEditClient && editState ? (
-              <form onSubmit={submitClientEdit} className="mb-[14px] border border-[#c3cbc2] border-t-[3px] border-t-[#0d5c39] bg-white">
-                <div className="flex items-center border-b border-[#e4e8e2] px-[16px] py-[10px]">
+              <form onSubmit={submitClientEdit} className="yb-card mb-[14px] border border-yb-line border-t-[3px] border-t-[#0d5c39] bg-white">
+                <div className="flex items-center border-b border-yb-line-row px-[16px] py-[10px]">
                   <div>
                     <div className="text-[14px] font-bold">Edit client</div>
                     <div className="mt-[2px] text-[11px] text-[#6c766f]">Update the profile details used across requests, travellers, and fees.</div>
@@ -361,7 +398,7 @@ function ClientDetailPage() {
                 </div>
 
                 <div className="grid grid-cols-3 gap-x-[24px] gap-y-[14px] px-[18px] py-[16px]">
-                  <div className="col-span-3 border-b border-[#e4e8e2] pb-[5px] text-[10px] font-bold tracking-[0.12em] text-[#5c665e]">CLIENT DETAILS</div>
+                  <div className="col-span-3 border-b border-yb-line-row pb-[5px] text-[10px] font-bold tracking-[0.12em] text-[#5c665e]">CLIENT DETAILS</div>
                   <FormField label="Client name" required>
                     <input autoFocus required value={editState.name} onChange={(event) => setEditState({ ...editState, name: event.target.value })} className={controlClass} />
                   </FormField>
@@ -375,26 +412,38 @@ function ClientDetailPage() {
                       ).map((stage) => <option key={stage.id} value={stage.code}>{stage.name}</option>)}
                     </select>
                     <div className="mt-[4px] text-[10.5px] leading-[14px] text-[#6c766f]">Move forward one milestone at a time. Moving backward requires a reason.</div>
+                    <div className="mt-[4px] text-[10.5px] leading-[14px] text-[#6c766f]">Review complete and Fully onboarded require all configured required information to be present and its required reviews confirmed.</div>
+                    {editState.stage !== client.stage &&
+                      (editState.stage === "review_complete" || editState.stage === onboardingQuery.data?.completionStageCode) &&
+                      onboardingQuery.data && !onboardingQuery.data.canComplete && (
+                        <div role="status" className="mt-[6px] rounded-yb border border-yb-gold bg-[#fffaf0] p-[8px] text-[11px] text-yb-amber">
+                          <div className="font-semibold">This stage is blocked until these checks are complete:</div>
+                          <ul className="mt-[4px] list-disc pl-[16px]">
+                            {onboardingQuery.data.missingItems.map((item, index) => <li key={index}>{item}</li>)}
+                          </ul>
+                        </div>
+                    )}
                   </FormField>
 
                   <div className="col-span-3">
                     <FormField label="Reason for moving backward (required only for a backward move)">
-                      <textarea rows={2} value={editState.onboardingTransitionReason} onChange={(event) => setEditState({ ...editState, onboardingTransitionReason: event.target.value })} className="w-full resize-y border border-[#8d968e] bg-white px-[8px] py-[6px] text-[13px] outline-none focus:border-[#1a6b46]" />
+                      <textarea ref={reasonInput} rows={2} aria-invalid={reasonError} aria-describedby={reasonError ? "backward-reason-error" : undefined} value={editState.onboardingTransitionReason} onChange={(event) => { setEditState({ ...editState, onboardingTransitionReason: event.target.value }); if (event.target.value.trim()) setReasonError(false); }} className={`w-full resize-y rounded-yb border px-[8px] py-[6px] text-[13px] outline-none ${reasonError ? "border-yb-red bg-red-50 ring-1 ring-yb-red focus:border-yb-red" : "border-yb-line-btn bg-white focus:border-[#1a6b46]"}`} />
+                      {reasonError && <span id="backward-reason-error" role="alert" className="mt-[5px] block text-[12px] font-semibold text-yb-red">Please explain why the client is moving back to an earlier stage.</span>}
                     </FormField>
                   </div>
 
                   <div className="col-span-3">
                     <div className="mb-[5px] text-[12px] font-bold text-[#3c443d]">Client type</div>
-                    <div className="flex h-[30px] max-w-[480px] overflow-hidden border border-[#8d968e]">
+                    <div className="flex h-[30px] max-w-[480px] overflow-hidden border border-yb-line-btn">
                       {CLIENT_TYPES.map((type) => (
-                        <button key={type.value} type="button" aria-pressed={editState.clientType === type.value} onClick={() => setEditState({ ...editState, clientType: type.value })} className={`flex-1 border-r border-[#c3cbc2] px-[10px] text-[12px] last:border-r-0 ${editState.clientType === type.value ? "bg-[#0d5c39] font-bold text-white" : "bg-white text-[#3c443d] hover:bg-[#f2f5f0]"}`}>
+                        <button key={type.value} type="button" aria-pressed={editState.clientType === type.value} onClick={() => setEditState({ ...editState, clientType: type.value })} className={`flex-1 border-r border-yb-line px-[10px] text-[12px] last:border-r-0 ${editState.clientType === type.value ? "bg-yb-green font-bold text-white" : "bg-white text-[#3c443d] hover:bg-yb-panel-head"}`}>
                           {type.label}
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  <div className="col-span-3 mt-[2px] border-b border-[#e4e8e2] pb-[5px] text-[10px] font-bold tracking-[0.12em] text-[#5c665e]">ASSIGNMENT &amp; FEES</div>
+                  <div className="col-span-3 mt-[2px] border-b border-yb-line-row pb-[5px] text-[10px] font-bold tracking-[0.12em] text-[#5c665e]">ASSIGNMENT &amp; FEES</div>
                   <FormField label="Preferred rep">
                     <select value={editState.preferredRepId} onChange={(event) => setEditState({ ...editState, preferredRepId: event.target.value })} className={controlClass}>
                       <option value="">Unassigned</option>
@@ -416,7 +465,7 @@ function ClientDetailPage() {
                   {editError && <div className="col-span-3 text-[12px] text-[#a8341f]">{editError}</div>}
                 </div>
 
-                <div className="flex items-center border-t border-[#d7dcd5] bg-[#f2f5f0] px-[16px] py-[10px]">
+                <div className="flex items-center border-t border-yb-line bg-yb-panel-head px-[16px] py-[10px]">
                   <div className="text-[11px] text-[#7a8580]">Created {new Date(client.createdAt).toLocaleDateString()} · Demo profiles cannot be edited</div>
                   <div className="flex-1" />
                   <SecondaryButton type="button" className="mr-[10px] h-[30px] px-[16px] text-[12px]" onClick={closeEditClient}>Cancel</SecondaryButton>
@@ -426,8 +475,8 @@ function ClientDetailPage() {
                 </div>
               </form>
             ) : (
-            <section className="mb-[14px] border border-[#c3cbc2] bg-white">
-              <div className="border-b border-[#d7dcd5] bg-[#eff2ec] px-[12px] py-[7px] text-[10px] font-bold tracking-[0.12em] text-[#5c665e]">
+            <section className="yb-card mb-[14px] border border-yb-line bg-white">
+              <div className="border-b border-yb-line bg-yb-panel-head px-[12px] py-[7px] text-[10px] font-bold tracking-[0.12em] text-[#5c665e]">
                 CLIENT DETAILS
               </div>
               <div className="grid grid-cols-7 gap-x-[22px] gap-y-[18px] px-[18px] py-[16px]">
@@ -440,16 +489,16 @@ function ClientDetailPage() {
                 <DetailField label="Created">{new Date(client.createdAt).toLocaleDateString()}</DetailField>
               </div>
               {client.isDemo && (
-                <div className="border-t border-[#e4e8e2] bg-[#fffaf0] px-[18px] py-[8px] text-[11.5px] text-[#765b16]">
+                <div className="border-t border-yb-line-row bg-[#fffaf0] px-[18px] py-[8px] text-[11.5px] text-[#765b16]">
                   This sample profile is controlled from System Administrator Setup. Disable demo data to hide it from operational screens.
                 </div>
               )}
             </section>
             )}
 
-            {showAddTraveller && (
-              <form onSubmit={submitTraveller} className="mb-[14px] border border-[#c3cbc2] border-t-[3px] border-t-[#0d5c39] bg-white">
-                <div className="flex items-center border-b border-[#e4e8e2] px-[16px] py-[10px]">
+            {showAddTraveller && canAddTraveller && (
+              <form onSubmit={submitTraveller} className="yb-card mb-[14px] border border-yb-line border-t-[3px] border-t-[#0d5c39] bg-white">
+                <div className="flex items-center border-b border-yb-line-row px-[16px] py-[10px]">
                   <div>
                     <div className="text-[14px] font-bold">Add traveller</div>
                     <div className="mt-[2px] text-[11px] text-[#6c766f]">The traveller will be linked to {client.name}.</div>
@@ -459,10 +508,10 @@ function ClientDetailPage() {
                 </div>
 
                 <div className="grid grid-cols-[190px_minmax(0,1fr)]">
-                  <div className="border-r border-[#e4e8e2] bg-[#f9faf8] p-[12px]">
+                  <div className="border-r border-yb-line-row bg-yb-panel-head p-[12px]">
                     {([[
                       "new", "Create new traveller",
-                    ], ["existing", "Add existing traveller"]] as Array<[AddMode, string]>).map(([mode, label]) => (
+                    ], ["existing", "Add existing traveller"]] as Array<[AddMode, string]>).filter(([mode]) => mode === "new" ? canCreateTraveller : canLinkTraveller).map(([mode, label]) => (
                       <button key={mode} type="button" onClick={() => { setAddMode(mode); resetAddForm(); }} className={`mb-[6px] w-full border px-[10px] py-[8px] text-left text-[12px] ${addMode === mode ? "border-[#0d5c39] bg-[#eaf2ed] font-bold text-[#0d5c39]" : "border-[#ccd3cb] bg-white text-[#3c443d]"}`}>
                         {label}
                       </button>
@@ -501,7 +550,7 @@ function ClientDetailPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-end gap-[10px] border-t border-[#d7dcd5] bg-[#f2f5f0] px-[16px] py-[10px]">
+                <div className="flex items-center justify-end gap-[10px] border-t border-yb-line bg-yb-panel-head px-[16px] py-[10px]">
                   <SecondaryButton type="button" className="h-[30px] px-[16px] text-[12px]" onClick={() => { setShowAddTraveller(false); resetAddForm(); }}>Cancel</SecondaryButton>
                   <PrimaryButton type="submit" className="h-[30px] px-[18px] text-[12px]" disabled={addPending}>
                     {addPending ? "Adding…" : addMode === "new" ? "Create & Add Traveller" : "Add Traveller"}
@@ -512,8 +561,8 @@ function ClientDetailPage() {
 
             {notice && <div className="mb-[14px] border border-[#b7d1bf] bg-[#eef6f0] px-[12px] py-[9px] text-[12px] text-[#0d5c39]">{notice}</div>}
 
-            <section className="mb-[14px] border border-[#c3cbc2] bg-white">
-              <div className="flex items-center border-b border-[#d7dcd5] bg-[#eff2ec] px-[12px] py-[7px]">
+            {canReadOnboarding && <section className="yb-card mb-[14px] border border-yb-line bg-white">
+              <div className="flex items-center border-b border-yb-line bg-yb-panel-head px-[12px] py-[7px]">
                 <div className="text-[10px] font-bold tracking-[0.12em] text-[#5c665e]">ONBOARDING PROGRESS</div>
                 <div className="flex-1" />
                 {onboardingQuery.data && (
@@ -534,30 +583,30 @@ function ClientDetailPage() {
                     <div className="mb-[7px] text-[10px] font-bold uppercase tracking-[0.1em] text-[#5c665e]">Required information</div>
                     {onboardingQuery.data.checklist.length === 0 && <div className="text-[12px] text-[#6c766f]">No active information requirements are configured.</div>}
                     {onboardingQuery.data.checklist.map((item) => (
-                      <div key={`${item.requirementFieldId}-${item.entityType}-${item.entityId}`} className="flex items-center gap-[10px] border-b border-[#edf0ea] py-[8px] last:border-b-0">
+                      <div key={`${item.requirementFieldId}-${item.entityType}-${item.entityId}`} className="flex items-center gap-[10px] border-b border-yb-line-row py-[8px] last:border-b-0">
                         <span className={`h-[9px] w-[9px] rounded-full ${item.satisfied ? "bg-[#249155]" : item.present ? "bg-[#d89b13]" : "bg-[#b63a2b]"}`} />
                         <div className="min-w-0 flex-1">
                           <div className="text-[12px] font-bold text-[#2c332d]">{item.entityLabel} · {item.label}</div>
                           <div className="truncate text-[10.5px] text-[#6c766f]">{item.present ? item.valueSummary : "Missing"}{item.reviewed ? ` · reviewed${item.reviewedByName ? ` by ${item.reviewedByName}` : ""}` : item.requiresReview && item.present ? " · review required" : ""}</div>
                         </div>
-                        {item.present && item.requiresReview && !item.reviewed && !client.isDemo && (
+                        {item.present && item.requiresReview && !item.reviewed && !client.isDemo && canManageOnboarding && (
                           <button type="button" disabled={reviewInformationMutation.isPending} onClick={() => reviewInformationMutation.mutate({ requirementFieldId: item.requirementFieldId, entityType: item.entityType as "client" | "traveller", entityId: item.entityId })} className="border border-[#0b5c3b] bg-white px-[9px] py-[4px] text-[10.5px] font-bold text-[#0b5c3b] hover:bg-[#edf7f0] disabled:opacity-50">Confirm reviewed</button>
                         )}
                       </div>
                     ))}
                     {reviewInformationMutation.isError && <div className="mt-[8px] text-[11px] text-[#a8341f]">{reviewInformationMutation.error instanceof Error ? reviewInformationMutation.error.message : "Review could not be saved"}</div>}
                   </div>
-                  <aside className="border-l border-[#d7dcd5] bg-[#f9faf8] px-[14px] py-[14px]">
+                  <aside className="border-l border-yb-line bg-yb-panel-head px-[14px] py-[14px]">
                     <div className="mb-[7px] text-[10px] font-bold uppercase tracking-[0.1em] text-[#5c665e]">Milestone tasks</div>
                     {onboardingQuery.data.tasks.filter((task) => task.status === "open").length === 0 && <div className="mb-[14px] text-[11.5px] text-[#6c766f]">No open milestone tasks.</div>}
                     {onboardingQuery.data.tasks.filter((task) => task.status === "open").map((task) => (
                       <div key={task.id} className="mb-[8px] border border-[#cbd3ca] bg-white p-[8px]">
                         <div className="text-[11.5px] font-bold">{task.title}</div>
                         <div className="mt-[2px] text-[10px] text-[#6c766f]">{task.priority.toUpperCase()}{task.dueAt ? ` · due ${dateLabel(task.dueAt)}` : ""}</div>
-                        {!client.isDemo && <button type="button" disabled={completeTaskMutation.isPending} onClick={() => completeTaskMutation.mutate(task.id)} className="mt-[6px] text-[10.5px] font-bold text-[#0b5c3b] underline">Mark complete</button>}
+                        {!client.isDemo && canManageOnboarding && <button type="button" disabled={completeTaskMutation.isPending} onClick={() => completeTaskMutation.mutate(task.id)} className="mt-[6px] text-[10.5px] font-bold text-[#0b5c3b] underline">Mark complete</button>}
                       </div>
                     ))}
-                    <div className="mb-[7px] mt-[12px] border-t border-[#d7dcd5] pt-[10px] text-[10px] font-bold uppercase tracking-[0.1em] text-[#5c665e]">Stage history</div>
+                    <div className="mb-[7px] mt-[12px] border-t border-yb-line pt-[10px] text-[10px] font-bold uppercase tracking-[0.1em] text-[#5c665e]">Stage history</div>
                     {onboardingQuery.data.transitions.slice(0, 5).map((transition) => (
                       <div key={transition.id} className="mb-[7px] border-l-2 border-[#b9d2c1] pl-[7px] text-[10.5px]">
                         <div className="font-bold">{transition.fromStageName ? `${transition.fromStageName} → ` : "Started at "}{transition.toStageName}</div>
@@ -568,10 +617,10 @@ function ClientDetailPage() {
                   </aside>
                 </div>
               )}
-            </section>
+            </section>}
 
-            <section className="border border-[#c3cbc2] bg-white">
-              <div className="flex items-center border-b border-[#d7dcd5] bg-[#eff2ec] px-[12px] py-[7px]">
+            {canReadTravellers && <section className="yb-card border border-yb-line bg-white">
+              <div className="flex items-center border-b border-yb-line bg-yb-panel-head px-[12px] py-[7px]">
                 <div className="text-[10px] font-bold tracking-[0.12em] text-[#5c665e]">TRAVELLERS</div>
                 <div className="flex-1" />
                 <div className="text-[11px] text-[#6c766f]">{clientTravellersQuery.data?.length ?? 0} linked</div>
@@ -583,17 +632,17 @@ function ClientDetailPage() {
                 <tbody>
                   {(clientTravellersQuery.data ?? []).map((traveller) => (
                     <tr key={traveller.id} className="hover:bg-[#f7f9f6]">
-                      <td className="border-b border-[#edf0ea] px-[12px] py-[10px] font-bold text-[#0b5c3b]"><Link to="/travellers/$travellerId" params={{ travellerId: String(traveller.id) }} className="underline">{traveller.name}</Link></td>
-                      <td className="border-b border-[#edf0ea] px-[12px] py-[10px]">{dateLabel(traveller.dob)}</td>
-                      <td className="border-b border-[#edf0ea] px-[12px] py-[10px]">{traveller.relationship ? RELATIONSHIP_LABELS[traveller.relationship as TravellerRelationship] ?? traveller.relationship : "—"}</td>
-                      <td className={`border-b border-[#edf0ea] px-[12px] py-[10px] font-bold ${traveller.passportStatus === "missing" ? "text-[#a8341f]" : traveller.passportStatus === "expiring_soon" ? "text-[#8a6d10]" : "text-[#0d5c39]"}`}>{passportLabel(traveller.passportStatus)}</td>
+                      <td className="border-b border-yb-line-row px-[12px] py-[10px] font-bold text-[#0b5c3b]"><Link to="/travellers/$travellerId" params={{ travellerId: String(traveller.id) }} className="underline">{traveller.name}</Link></td>
+                      <td className="border-b border-yb-line-row px-[12px] py-[10px]">{dateLabel(traveller.dob)}</td>
+                      <td className="border-b border-yb-line-row px-[12px] py-[10px]">{traveller.relationship ? RELATIONSHIP_LABELS[traveller.relationship as TravellerRelationship] ?? traveller.relationship : "—"}</td>
+                      <td className={`border-b border-yb-line-row px-[12px] py-[10px] font-bold ${traveller.passportStatus === "missing" ? "text-[#a8341f]" : traveller.passportStatus === "expiring_soon" ? "text-[#8a6d10]" : "text-[#0d5c39]"}`}>{passportLabel(traveller.passportStatus)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               {clientTravellersQuery.isLoading && <div className="p-[24px] text-center text-[12px] text-[#6c766f]">Loading travellers…</div>}
               {!clientTravellersQuery.isLoading && (clientTravellersQuery.data?.length ?? 0) === 0 && <div className="p-[24px] text-center text-[12px] text-[#6c766f]">No travellers are linked to this client yet. Use Add Traveller to create or attach one.</div>}
-            </section>
+            </section>}
             {!client.isDemo && <EntityRecordsPanel entity="client" id={clientId} />}
           </>
         )}

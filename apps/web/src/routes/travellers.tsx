@@ -1,4 +1,4 @@
-import { Link, Outlet, createFileRoute, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, Outlet, createFileRoute, redirect, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import type { PassportStatus, TravellerRelationship } from "@yb-travel/shared";
@@ -6,8 +6,15 @@ import { AppHeader } from "../components/AppShell/AppHeader";
 import { ImplementationStatusIcon } from "../components/ImplementationStatusIcon";
 import { clientsApi, travellersApi } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
+import { useAuth } from "../lib/AuthContext";
+import { getStoredUser, hasPermission } from "../lib/session";
 
-export const Route = createFileRoute("/travellers")({ component: TravellersPage });
+export const Route = createFileRoute("/travellers")({
+  beforeLoad: () => {
+    if (!hasPermission(getStoredUser(), "travellers.read")) throw redirect({ to: "/" });
+  },
+  component: TravellersPage,
+});
 
 type TravellerTab = "identity" | "documents" | "accounts" | "preferences";
 type TravellerView = "all" | "missing" | "expiring" | "minors" | "mine";
@@ -36,7 +43,7 @@ const RELATIONSHIP_LABELS: Record<TravellerRelationship, string> = {
 };
 
 const COUNTRIES = ["United States", "Israel", "Ethiopia", "Canada", "United Kingdom"];
-const controlClass = "h-[28px] w-full border border-[#8d968e] bg-white px-[7px] text-[13px] text-[#1c1f1b] outline-none focus:border-[#1a6b46] focus:ring-1 focus:ring-[#1a6b46]";
+const controlClass = "h-[28px] w-full border border-yb-line-btn bg-white px-[7px] text-[13px] text-yb-ink outline-none focus:border-[#1a6b46] focus:ring-1 focus:ring-[#1a6b46]";
 
 function ageFromDob(dob: string | null) {
   if (!dob) return null;
@@ -86,14 +93,18 @@ function SectionTitle({ children, action }: { children: ReactNode; action?: Reac
 }
 
 function TravellersPage() {
+  const { can } = useAuth();
+  const canReadClients = can("clients.read");
+  const canCreateTraveller = can("travellers.create");
+  const canLinkTraveller = can("travellers.link") && canReadClients;
   const params = useParams({ strict: false }) as { travellerId?: string };
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const travellersQuery = useQuery({ queryKey: ["travellers"], queryFn: travellersApi.list });
-  const clientsQuery = useQuery({ queryKey: ["clients"], queryFn: clientsApi.list });
+  const clientsQuery = useQuery({ queryKey: ["clients"], queryFn: clientsApi.list, enabled: canLinkTraveller });
   const [query, setQuery] = useState("");
   const [view, setView] = useState<TravellerView>("all");
-  const [showForm, setShowForm] = useState(true);
+  const [showForm, setShowForm] = useState(canCreateTraveller);
   const [activeTab, setActiveTab] = useState<TravellerTab>("identity");
   const [keepOpenAfterCreate, setKeepOpenAfterCreate] = useState(false);
   const [title, setTitle] = useState("");
@@ -156,7 +167,7 @@ function TravellersPage() {
   }, [allTravellers, query, view]);
 
   const legalNameReady = Boolean(givenName.trim() && familyName.trim());
-  const canCreate = legalNameReady && Boolean(dob);
+  const canSubmit = legalNameReady && Boolean(dob);
   const linked = links.some((link) => Boolean(link.clientId));
   const passportReady = passportStatus === "on_file" && Boolean(passportNumber && passportIssuingCountry && passportExpiresOn);
   const completeness = Math.round(([legalNameReady, Boolean(dob), passportReady, linked, false].filter(Boolean).length / 5) * 100);
@@ -168,7 +179,7 @@ function TravellersPage() {
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    if (!canCreate) { setActiveTab("identity"); setError("Given name, family name and date of birth are required"); return; }
+    if (!canSubmit) { setActiveTab("identity"); setError("Given name, family name and date of birth are required"); return; }
     if (links.some((link) => link.clientId && !link.relationship)) { setActiveTab("accounts"); setError("Select the traveller's relationship to every linked client account"); return; }
     setError(null);
     createMutation.mutate({
@@ -181,21 +192,21 @@ function TravellersPage() {
       passportNumber: passportNumber || null,
       passportIssuingCountry: passportIssuingCountry || null,
       passportExpiresOn: passportExpiresOn || null,
-      links: links.filter((link) => link.clientId).map((link) => ({ clientId: Number(link.clientId), relationship: link.relationship || null })),
+      links: canLinkTraveller ? links.filter((link) => link.clientId).map((link) => ({ clientId: Number(link.clientId), relationship: link.relationship || null })) : [],
     });
   }
 
   const tabs: Array<{ id: TravellerTab; label: string; flagged: boolean; implementation?: { label: string; description: string } }> = [
-    { id: "identity", label: "Identity", flagged: !canCreate },
+    { id: "identity", label: "Identity", flagged: !canSubmit },
     { id: "documents", label: "Documents", flagged: !passportReady },
-    { id: "accounts", label: "Client Accounts", flagged: !linked },
+    ...(canLinkTraveller ? [{ id: "accounts" as const, label: "Client Accounts", flagged: !linked }] : []),
     { id: "preferences", label: "Preferences", flagged: false, implementation: { label: "Not implemented", description: "Preference and loyalty-program values are not saved yet." } },
   ];
 
   if (params.travellerId) return <Outlet />;
 
   return (
-    <div className="yb-reference-scale min-h-screen min-w-[1180px] bg-[#eef0ea] font-[Helvetica,Arial,sans-serif] leading-[1.2] text-[#1c1f1b]">
+    <div className="min-h-screen min-w-[1180px] bg-yb-canvas font-sans leading-[1.2] text-yb-ink">
       <AppHeader tabs={NAV_TABS} query={query} onQueryChange={setQuery} compact />
       <nav className="flex h-[31px] items-center gap-[22px] border-b border-[#d3d8d0] bg-white px-[16px] text-[12px]">
         {([[
@@ -210,14 +221,14 @@ function TravellersPage() {
       <main className="px-[16px] pt-[14px] pb-[40px]">
         <header className="mb-[12px] flex items-end gap-[12px]">
           <div className="h-[22px] w-[22px] border border-[#b0b8ae] bg-white p-[5px]" aria-hidden="true"><div className="h-full w-full bg-[#d9a01e]" /></div>
-          <div><div className="text-[10px] uppercase tracking-[0.14em] text-[#6c766f]">Travellers</div><div className="flex items-baseline gap-[8px]"><h1 className="text-[24px] font-bold tracking-[-0.01em]">All Travellers</h1><span className="text-[12px] text-[#6c766f]">{allTravellers.length} total · {missingCount} missing passport info</span></div></div>
+          <div><div className="text-[10px] uppercase tracking-[0.14em] text-[#6c766f]">Travellers</div><div className="flex items-baseline gap-[8px]"><h1 className="yb-page-title">All Travellers</h1><span className="text-[12px] text-[#6c766f]">{allTravellers.length} total · {missingCount} missing passport info</span></div></div>
           <div className="flex-1" />
-          {!showForm && <button type="button" onClick={() => setShowForm(true)} className="border border-[#0a4a2e] bg-[#0d5c39] px-[14px] py-[6px] text-[12px] font-bold text-white">+ New Traveller</button>}
+          {canCreateTraveller && !showForm && <button type="button" onClick={() => setShowForm(true)} className="border border-[#0a4a2e] bg-yb-green px-[14px] py-[6px] text-[12px] font-bold text-white">+ New Traveller</button>}
           <button type="button" aria-disabled="true" className="group/status-parent flex items-center gap-[6px] border border-[#b0b8ae] bg-white px-[14px] py-[6px] text-[12px]">Import from CSV <ImplementationStatusIcon label="Not implemented" description="CSV traveller import is not available yet." withinInteractiveControl /></button>
           <button type="button" aria-disabled="true" className="group/status-parent flex items-center gap-[6px] border border-[#b0b8ae] bg-white px-[14px] py-[6px] text-[12px]">Export ▾ <ImplementationStatusIcon label="Not implemented" description="Traveller export is not available yet." withinInteractiveControl /></button>
         </header>
 
-        {showForm && <form onSubmit={submit} className="yb-traveller-card mb-[14px] border border-t-[3px] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+        {canCreateTraveller && showForm && <form onSubmit={submit} className="yb-card yb-traveller-card mb-[14px] border border-t-[3px] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
           <div className="yb-traveller-card-header flex items-center gap-[10px] border-b px-[16px] py-[10px]"><div className="text-[14px] font-bold">New traveller</div><div className="text-[11px] text-[#6c766f]">Legal name and date of birth are required — documents and preferences can follow.</div><div className="flex-1" /><button type="button" aria-label="Close new traveller form" onClick={() => setShowForm(false)} className="bg-transparent px-[2px] text-[18px] text-[#6c766f]">×</button></div>
           <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(230px, 310px)" }}>
             <div className="min-w-0 px-[20px] pt-[14px] pb-[18px]">
@@ -258,7 +269,7 @@ function TravellersPage() {
 
               {activeTab === "accounts" && <div>
                 <SectionTitle action={<button type="button" onClick={() => setLinks((current) => [...current, { clientId: "", relationship: "" }])} className="text-[11px] text-[#0b5c3b] underline">+ Add client account</button>}>Client accounts</SectionTitle>
-                <div className="border border-[#ccd3cb]"><div className="grid gap-[8px] border-b border-[#dfe4dc] bg-[#f2f5f0] px-[10px] py-[5px] text-[10px] font-bold tracking-[0.1em] text-[#5c665e]" style={{ gridTemplateColumns: "minmax(0, 1.3fr) minmax(0, 1fr) 34px" }}><div>CLIENT</div><div>RELATIONSHIP</div><div /></div>{links.map((link, index) => <div key={index} className="grid items-center gap-[8px] border-b border-[#edf0ea] px-[10px] py-[8px]" style={{ gridTemplateColumns: "minmax(0, 1.3fr) minmax(0, 1fr) 34px" }}><select value={link.clientId} onChange={(e) => updateLink(index, { clientId: e.target.value })} className={controlClass}><option value="">Select client…</option>{(clientsQuery.data ?? []).filter((client) => !client.isDemo).map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><select value={link.relationship} onChange={(e) => updateLink(index, { relationship: e.target.value as TravellerRelationship | "" })} className={controlClass}><option value="">Relationship…</option>{(Object.keys(RELATIONSHIP_LABELS) as TravellerRelationship[]).map((relationship) => <option key={relationship} value={relationship}>{RELATIONSHIP_LABELS[relationship]}</option>)}</select><button type="button" aria-label="Remove client account" onClick={() => setLinks((current) => current.length === 1 ? [{ clientId: "", relationship: "" }] : current.filter((_, i) => i !== index))} className="h-[28px] border border-[#b0b8ae] bg-white text-[#6c766f]">×</button></div>)}</div>
+                <div className="border border-[#ccd3cb]"><div className="grid gap-[8px] border-b border-[#dfe4dc] bg-yb-panel-head px-[10px] py-[5px] text-[10px] font-bold tracking-[0.1em] text-[#5c665e]" style={{ gridTemplateColumns: "minmax(0, 1.3fr) minmax(0, 1fr) 34px" }}><div>CLIENT</div><div>RELATIONSHIP</div><div /></div>{links.map((link, index) => <div key={index} className="grid items-center gap-[8px] border-b border-yb-line-row px-[10px] py-[8px]" style={{ gridTemplateColumns: "minmax(0, 1.3fr) minmax(0, 1fr) 34px" }}><select value={link.clientId} onChange={(e) => updateLink(index, { clientId: e.target.value })} className={controlClass}><option value="">Select client…</option>{(clientsQuery.data ?? []).filter((client) => !client.isDemo).map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><select value={link.relationship} onChange={(e) => updateLink(index, { relationship: e.target.value as TravellerRelationship | "" })} className={controlClass}><option value="">Relationship…</option>{(Object.keys(RELATIONSHIP_LABELS) as TravellerRelationship[]).map((relationship) => <option key={relationship} value={relationship}>{RELATIONSHIP_LABELS[relationship]}</option>)}</select><button type="button" aria-label="Remove client account" onClick={() => setLinks((current) => current.length === 1 ? [{ clientId: "", relationship: "" }] : current.filter((_, i) => i !== index))} className="h-[28px] border border-[#b0b8ae] bg-white text-[#6c766f]">×</button></div>)}</div>
                 <div className="mt-[6px] text-[11px] text-[#7a8580]">One person can belong to several client accounts.</div>
               </div>}
 
@@ -269,20 +280,20 @@ function TravellersPage() {
               {error && <div role="alert" className="mt-[10px] text-[12px] font-bold text-[#a8341f]">{error}</div>}
             </div>
 
-            <aside className="yb-traveller-aside border-l bg-[#f9faf8] px-[16px] py-[14px]">
+            <aside className="yb-traveller-aside border-l bg-yb-panel-head px-[16px] py-[14px]">
               <div className="mb-[8px] text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Ticket name preview</div><div className="border border-[#dfe4dc] bg-white p-[10px]"><div className="text-[13px] font-bold uppercase tracking-[0.03em]">{ticketName}</div><div className="mt-[3px] text-[11px] text-[#7a8580]">How the name prints on the e-ticket.</div></div>
-              <div className="my-[12px] border-t border-[#e4e8e2]" /><div className="mb-[7px] text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Profile completeness</div><div className="mb-[6px] h-[6px] bg-[#e4e8e2]"><div className="h-[6px] bg-[#0d5c39]" style={{ width: `${completeness}%` }} /></div><div className="mb-[9px] text-[11.5px] text-[#59635b]">{completeness}% complete — a traveller can be saved at any stage.</div>
+              <div className="my-[12px] border-t border-yb-line-row" /><div className="mb-[7px] text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Profile completeness</div><div className="mb-[6px] h-[6px] bg-[#e4e8e2]"><div className="h-[6px] bg-yb-green" style={{ width: `${completeness}%` }} /></div><div className="mb-[9px] text-[11.5px] text-[#59635b]">{completeness}% complete — a traveller can be saved at any stage.</div>
               {([['Legal name', legalNameReady], ['Date of birth', Boolean(dob)], ['Passport on file', passportReady], ['Linked to a client', linked], ['Loyalty numbers', false]] as Array<[string, boolean]>).map(([label, ready]) => <div key={label} className={`mb-[5px] flex gap-[7px] text-[11.5px] ${ready ? "text-[#0d5c39]" : "text-[#9aa39b]"}`}><span className="font-bold">{ready ? "✓" : "○"}</span><span>{label}</span></div>)}
-              <div className="my-[12px] border-t border-[#e4e8e2]" /><div className="text-[11.5px] leading-[1.6] text-[#7a8580]">Duplicate names with the same date of birth are flagged after saving, never blocked.</div>
+              <div className="my-[12px] border-t border-yb-line-row" /><div className="text-[11.5px] leading-[1.6] text-[#7a8580]">Duplicate names with the same date of birth are flagged after saving, never blocked.</div>
             </aside>
           </div>
-          <div className="yb-traveller-card-footer flex items-center gap-[10px] border-t bg-[#f2f5f0] px-[16px] py-[10px]"><div className="text-[11px] text-[#7a8580]">Given name, family name and date of birth are required.</div><div className="flex-1" /><button type="button" onClick={() => setShowForm(false)} className="border border-[#8d968e] bg-white px-[16px] py-[6px] text-[12px]">Cancel</button><button type="submit" onClick={() => setKeepOpenAfterCreate(true)} disabled={!canCreate || createMutation.isPending} className="border border-[#8d968e] bg-white px-[16px] py-[6px] text-[12px] disabled:text-[#9aa39b]">Create &amp; New</button><button type="submit" onClick={() => setKeepOpenAfterCreate(false)} disabled={!canCreate || createMutation.isPending} className="border border-[#0a4a2e] bg-[#0d5c39] px-[20px] py-[6px] text-[12px] font-bold text-white disabled:border-[#c8cec6] disabled:bg-[#dfe3dd] disabled:text-[#9aa39b]">{createMutation.isPending ? "Creating…" : "Create Traveller"}</button></div>
+          <div className="yb-traveller-card-footer flex items-center gap-[10px] border-t bg-yb-panel-head px-[16px] py-[10px]"><div className="text-[11px] text-[#7a8580]">Given name, family name and date of birth are required.</div><div className="flex-1" /><button type="button" onClick={() => setShowForm(false)} className="border border-yb-line-btn bg-white px-[16px] py-[6px] text-[12px]">Cancel</button><button type="submit" onClick={() => setKeepOpenAfterCreate(true)} disabled={!canSubmit || createMutation.isPending} className="border border-yb-line-btn bg-white px-[16px] py-[6px] text-[12px] disabled:text-[#9aa39b]">Create &amp; New</button><button type="submit" onClick={() => setKeepOpenAfterCreate(false)} disabled={!canSubmit || createMutation.isPending} className="border border-[#0a4a2e] bg-yb-green px-[20px] py-[6px] text-[12px] font-bold text-white disabled:border-[#c8cec6] disabled:bg-[#dfe3dd] disabled:text-[#9aa39b]">{createMutation.isPending ? "Creating…" : "Create Traveller"}</button></div>
         </form>}
 
-        <section className="yb-traveller-table border bg-white">
-          <div className="flex items-center border-b border-[#d7dcd5] bg-[#eff2ec] px-[12px] py-[6px]"><div className="text-[10px] font-bold tracking-[0.12em] text-[#5c665e]">TRAVELLERS — {view === "all" ? "ALL TRAVELLERS" : view.toUpperCase()}</div><div className="flex-1" /><div className="text-[11px] text-[#6c766f]">{filteredTravellers.length} items</div></div>
-          <div className="flex items-center gap-[10px] border-b border-[#e4e8e2] px-[12px] py-[8px] text-[12px]"><span>View:</span><select value={view} onChange={(e) => setView(e.target.value as TravellerView)} className="h-[24px] border border-[#8d968e] text-[12px]"><option value="all">All Travellers</option><option value="missing">Missing Documents</option><option value="expiring">Expiring soon</option><option value="minors">Minors</option></select><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter by name or passport" className="h-[24px] w-[210px] border border-[#8d968e] px-[6px] text-[12px]" /><span className="flex items-center gap-[5px] text-[#7a8580]">Edit <ImplementationStatusIcon label="Not implemented" description="Custom view editing is not available yet." /></span><span className="flex items-center gap-[5px] text-[#7a8580]">Create New View <ImplementationStatusIcon label="Not implemented" description="Creating custom traveller views is not available yet." /></span></div>
-          <div className="overflow-auto"><table className="w-full min-w-[900px] border-collapse text-[12.5px]"><thead><tr className="bg-[#f7f9f6]">{["Traveller", "Date of Birth", "Age", "Passport", "Expires", "Nationality", "Client Accounts", "Last Trip"].map((heading) => <th key={heading} className={`border-b border-[#cfd6ce] px-[12px] py-[7px] text-left text-[11px] font-bold text-[#3c443d] ${heading === "Last Trip" ? "text-right" : ""}`}>{heading}</th>)}</tr></thead><tbody>{filteredTravellers.map((traveller) => { const age = ageFromDob(traveller.dob); const openTraveller = () => navigate({ to: "/travellers/$travellerId", params: { travellerId: String(traveller.id) } }); return <tr key={traveller.id} role="link" tabIndex={0} onClick={openTraveller} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openTraveller(); } }} className="cursor-pointer hover:bg-[#f7f9f6] focus:bg-[#f7f9f6] focus:outline-none"><td className="border-b border-[#edf0ea] px-[12px] py-[9px]"><Link to="/travellers/$travellerId" params={{ travellerId: String(traveller.id) }} onClick={(event) => event.stopPropagation()} className="font-bold text-[#0b5c3b] underline">{traveller.name}</Link>{traveller.isDemo && <span className="ml-[7px] border border-[#d3b35a] bg-[#fff7d8] px-[5px] py-[1px] text-[9px] font-bold text-[#7b5b00]">DEMO</span>}{age !== null && age < 18 && <span className="ml-[7px] border border-[#d7dcd5] bg-[#eef2ea] px-[6px] py-[1px] text-[10px] font-bold">MINOR</span>}</td><td className="border-b border-[#edf0ea] px-[12px] py-[9px]">{traveller.dob ? dateLabel(traveller.dob) : "Missing"}</td><td className="border-b border-[#edf0ea] px-[12px] py-[9px]">{age ?? "—"}</td><td className="border-b border-[#edf0ea] px-[12px] py-[9px]"><span className={`font-bold ${traveller.passportStatus === "missing" ? "text-[#a8341f]" : traveller.passportStatus === "expiring_soon" ? "text-[#8a6d10]" : "text-[#0d5c39]"}`}>● {PASSPORT_STATUS_LABELS[traveller.passportStatus]}</span></td><td className="border-b border-[#edf0ea] px-[12px] py-[9px] text-[#6c766f]">{dateLabel(traveller.passportExpiresOn)}</td><td className="border-b border-[#edf0ea] px-[12px] py-[9px]">{traveller.nationality ?? "—"}</td><td className="border-b border-[#edf0ea] px-[12px] py-[9px]">{traveller.clients.length ? traveller.clients.map((client, index) => <span key={client.clientId}>{index > 0 && ", "}<Link to="/clients/$clientId" params={{ clientId: String(client.clientId) }} onClick={(event) => event.stopPropagation()} className="text-[#0b5c3b] underline">{client.clientName}</Link>{client.relationship && ` (${RELATIONSHIP_LABELS[client.relationship as TravellerRelationship] ?? client.relationship})`}</span>) : "—"}</td><td className="border-b border-[#edf0ea] px-[12px] py-[9px] text-right text-[#6c766f]">—</td></tr>; })}</tbody></table>{travellersQuery.isLoading && <div className="p-[24px] text-center text-[12px] text-[#6c766f]">Loading travellers…</div>}{!travellersQuery.isLoading && filteredTravellers.length === 0 && <div className="p-[24px] text-center text-[12px] text-[#6c766f]">No travellers match this view.</div>}</div>
+        <section className="yb-card yb-traveller-table border bg-white">
+          <div className="flex items-center border-b border-yb-line bg-yb-panel-head px-[12px] py-[6px]"><div className="text-[10px] font-bold tracking-[0.12em] text-[#5c665e]">TRAVELLERS — {view === "all" ? "ALL TRAVELLERS" : view.toUpperCase()}</div><div className="flex-1" /><div className="text-[11px] text-[#6c766f]">{filteredTravellers.length} items</div></div>
+          <div className="flex items-center gap-[10px] border-b border-yb-line-row px-[12px] py-[8px] text-[12px]"><span>View:</span><select value={view} onChange={(e) => setView(e.target.value as TravellerView)} className="h-[24px] border border-yb-line-btn text-[12px]"><option value="all">All Travellers</option><option value="missing">Missing Documents</option><option value="expiring">Expiring soon</option><option value="minors">Minors</option></select><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter by name or passport" className="h-[24px] w-[210px] border border-yb-line-btn px-[6px] text-[12px]" /><span className="flex items-center gap-[5px] text-[#7a8580]">Edit <ImplementationStatusIcon label="Not implemented" description="Custom view editing is not available yet." /></span><span className="flex items-center gap-[5px] text-[#7a8580]">Create New View <ImplementationStatusIcon label="Not implemented" description="Creating custom traveller views is not available yet." /></span></div>
+          <div className="overflow-auto"><table className="w-full min-w-[900px] border-collapse text-[12.5px]"><thead><tr className="bg-[#f7f9f6]">{["Traveller", "Date of Birth", "Age", "Passport", "Expires", "Nationality", "Client Accounts", "Last Trip"].map((heading) => <th key={heading} className={`border-b border-[#cfd6ce] px-[12px] py-[7px] text-left text-[11px] font-bold text-[#3c443d] ${heading === "Last Trip" ? "text-right" : ""}`}>{heading}</th>)}</tr></thead><tbody>{filteredTravellers.map((traveller) => { const age = ageFromDob(traveller.dob); const openTraveller = () => navigate({ to: "/travellers/$travellerId", params: { travellerId: String(traveller.id) } }); return <tr key={traveller.id} role="link" tabIndex={0} onClick={openTraveller} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openTraveller(); } }} className="cursor-pointer hover:bg-[#f7f9f6] focus:bg-[#f7f9f6] focus:outline-none"><td className="border-b border-yb-line-row px-[12px] py-[9px]"><Link to="/travellers/$travellerId" params={{ travellerId: String(traveller.id) }} onClick={(event) => event.stopPropagation()} className="font-bold text-[#0b5c3b] underline">{traveller.name}</Link>{traveller.isDemo && <span className="ml-[7px] border border-[#d3b35a] bg-[#fff7d8] px-[5px] py-[1px] text-[9px] font-bold text-[#7b5b00]">DEMO</span>}{age !== null && age < 18 && <span className="ml-[7px] border border-yb-line bg-[#eef2ea] px-[6px] py-[1px] text-[10px] font-bold">MINOR</span>}</td><td className="border-b border-yb-line-row px-[12px] py-[9px]">{traveller.dob ? dateLabel(traveller.dob) : "Missing"}</td><td className="border-b border-yb-line-row px-[12px] py-[9px]">{age ?? "—"}</td><td className="border-b border-yb-line-row px-[12px] py-[9px]"><span className={`font-bold ${traveller.passportStatus === "missing" ? "text-[#a8341f]" : traveller.passportStatus === "expiring_soon" ? "text-[#8a6d10]" : "text-[#0d5c39]"}`}>● {PASSPORT_STATUS_LABELS[traveller.passportStatus]}</span></td><td className="border-b border-yb-line-row px-[12px] py-[9px] text-[#6c766f]">{dateLabel(traveller.passportExpiresOn)}</td><td className="border-b border-yb-line-row px-[12px] py-[9px]">{traveller.nationality ?? "—"}</td><td className="border-b border-yb-line-row px-[12px] py-[9px]">{traveller.clients.length ? traveller.clients.map((client, index) => <span key={client.clientId}>{index > 0 && ", "}{canReadClients ? <Link to="/clients/$clientId" params={{ clientId: String(client.clientId) }} onClick={(event) => event.stopPropagation()} className="text-[#0b5c3b] underline">{client.clientName}</Link> : client.clientName}{client.relationship && ` (${RELATIONSHIP_LABELS[client.relationship as TravellerRelationship] ?? client.relationship})`}</span>) : "—"}</td><td className="border-b border-yb-line-row px-[12px] py-[9px] text-right text-[#6c766f]">—</td></tr>; })}</tbody></table>{travellersQuery.isLoading && <div className="p-[24px] text-center text-[12px] text-[#6c766f]">Loading travellers…</div>}{!travellersQuery.isLoading && filteredTravellers.length === 0 && <div className="p-[24px] text-center text-[12px] text-[#6c766f]">No travellers match this view.</div>}</div>
         </section>
       </main>
     </div>

@@ -428,10 +428,15 @@ export class OnboardingService {
       throw new BadRequestException("Explain why the client is moving back to an earlier stage");
     }
     const target = stages[toIndex]!;
-    if (target.completion_stage) {
+    // Review complete is a checked milestone, not merely a status label.
+    // Re-evaluate the same checklist at final completion because reviewed
+    // values or the client's linked travellers may have changed in between.
+    if (target.code === "review_complete" || target.completion_stage) {
       const status = await this.getClientStatus(clientId, db);
       if (!status.canComplete) {
-        throw new BadRequestException(`Client cannot be fully onboarded: ${status.missingItems.slice(0, 4).join("; ")}`);
+        const stageLabel = target.code === "review_complete" ? "marked Review complete" : "fully onboarded";
+        const more = status.missingItems.length > 4 ? `; and ${status.missingItems.length - 4} more. See Onboarding progress.` : "";
+        throw new BadRequestException(`Client cannot be ${stageLabel}: ${status.missingItems.slice(0, 4).join("; ")}${more}`);
       }
     }
     await db.query(

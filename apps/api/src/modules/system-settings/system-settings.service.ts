@@ -170,7 +170,8 @@ export class SystemSettingsService {
       // events without touching users, configuration, audit/security records,
       // AI credentials/usage, or the WhatsApp connection and auth session.
       await client.query(
-        `TRUNCATE TABLE conversations, clients, travellers, staff_notifications
+        `TRUNCATE TABLE conversations, clients, travellers, staff_notifications, staff_reminders,
+                        supervisor_review_items
          RESTART IDENTITY CASCADE`,
       );
       await client.query(

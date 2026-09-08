@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
-import type { StaffRole } from "@yb-travel/shared";
+import type { StaffPermission, StaffRole } from "@yb-travel/shared";
 import type { Pool } from "pg";
 import { recordAudit } from "../../database/audit";
 import { PG_POOL } from "../../database/database.module";
@@ -15,6 +15,10 @@ export type RequestDetailsInput = {
   cabinClass: string | null;
   flexibility: string | null;
   specialRequests: string | null;
+  resolvedDepartureDate?: string | null;
+  departureDatePrecision?: "day" | "month" | null;
+  resolvedReturnDate?: string | null;
+  returnDatePrecision?: "day" | "month" | null;
 };
 
 export type TravelRequestRecord = {
@@ -28,6 +32,12 @@ export type TravelRequestRecord = {
   destination: string | null;
   departureDateText: string | null;
   returnDateText: string | null;
+  resolvedDepartureDate: string | null;
+  departureDatePrecision: "day" | "month" | null;
+  resolvedReturnDate: string | null;
+  returnDatePrecision: "day" | "month" | null;
+  bookingContextClosedAt: string | null;
+  bookingContextCloseReason: string | null;
   cabinClass: string | null;
   flexibility: string | null;
   specialRequests: string | null;
@@ -71,6 +81,12 @@ type RequestRow = {
   destination: string | null;
   departure_date_text: string | null;
   return_date_text: string | null;
+  resolved_departure_date: string | null;
+  departure_date_precision: "day" | "month" | null;
+  resolved_return_date: string | null;
+  return_date_precision: "day" | "month" | null;
+  booking_context_closed_at: string | null;
+  booking_context_close_reason: string | null;
   cabin_class: string | null;
   flexibility: string | null;
   special_requests: string | null;
@@ -109,6 +125,12 @@ function toRequest(row: RequestRow): TravelRequestRecord {
     destination: row.destination,
     departureDateText: row.departure_date_text,
     returnDateText: row.return_date_text,
+    resolvedDepartureDate: row.resolved_departure_date,
+    departureDatePrecision: row.departure_date_precision,
+    resolvedReturnDate: row.resolved_return_date,
+    returnDatePrecision: row.return_date_precision,
+    bookingContextClosedAt: row.booking_context_closed_at,
+    bookingContextCloseReason: row.booking_context_close_reason,
     cabinClass: row.cabin_class,
     flexibility: row.flexibility,
     specialRequests: row.special_requests,
@@ -139,7 +161,9 @@ function toRequest(row: RequestRow): TravelRequestRecord {
 const SELECT_REQUESTS = `
   SELECT r.id, r.request_number, r.client_id, c.name AS client_name,
          r.trip_summary, r.passenger_count, r.origin, r.destination,
-         r.departure_date_text, r.return_date_text, r.cabin_class, r.flexibility,
+         r.departure_date_text, r.return_date_text, r.resolved_departure_date,
+         r.departure_date_precision, r.resolved_return_date, r.return_date_precision,
+         r.booking_context_closed_at, r.booking_context_close_reason, r.cabin_class, r.flexibility,
          r.special_requests, r.request_type_id, rt.code AS request_type_code,
          rt.name AS request_type_name, r.request_status_id,
          rs.code AS request_status_code, rs.name AS request_status_name,
@@ -186,17 +210,47 @@ export class RequestsService {
     return toRequest(row);
   }
 
+  /**
+   * Enforces P1-14 ownership for request mutations. Staff with assignment-
+   * management authority may work across the queue; other operational staff
+   * may change only requests currently assigned to them.
+   */
+  async assertCanManage(id: number, actorUserId: number, actorPermissions: readonly StaffPermission[]): Promise<void> {
+    const result = await this.pool.query<{ assigned_user_id: number | null }>(
+      "SELECT assigned_user_id FROM travel_requests WHERE id = $1",
+      [id],
+    );
+    const row = result.rows[0];
+    if (!row) throw new NotFoundException("Travel request not found");
+    if (actorPermissions.includes("requests.assign_any")) return;
+    if (row.assigned_user_id !== actorUserId) {
+      throw new ForbiddenException("You can manage only requests assigned to you");
+    }
+  }
+
   getInformationStatus(id: number) {
     if (!this.onboarding) throw new Error("Information completeness is unavailable");
     return this.onboarding.getRequestStatus(id);
   }
 
-  reviewInformation(id: number, requirementFieldId: number, actorUserId: number) {
+  async reviewInformation(
+    id: number,
+    requirementFieldId: number,
+    actorUserId: number,
+    actorPermissions: readonly StaffPermission[],
+  ) {
     if (!this.onboarding) throw new Error("Information completeness is unavailable");
+    await this.assertCanManage(id, actorUserId, actorPermissions);
     return this.onboarding.reviewRequestField(id, requirementFieldId, actorUserId);
   }
 
-  async updateDetails(id: number, input: RequestDetailsInput, actorUserId: number): Promise<TravelRequestRecord> {
+  async updateDetails(
+    id: number,
+    input: RequestDetailsInput,
+    actorUserId: number,
+    actorPermissions: readonly StaffPermission[],
+  ): Promise<TravelRequestRecord> {
+    await this.assertCanManage(id, actorUserId, actorPermissions);
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -232,7 +286,8 @@ export class RequestsService {
     const result = await this.pool.query<{ id: number; name: string; roles: StaffRole[] }>(
       `SELECT id, name, roles
        FROM users
-       WHERE roles && ARRAY['travel_agent', 'offshore_intake_employee']::text[]
+       WHERE active = true
+         AND roles && ARRAY['travel_agent', 'supervisor_manager', 'offshore_intake_employee']::text[]
        ORDER BY name ASC, id ASC`,
     );
     return result.rows;
@@ -252,7 +307,7 @@ export class RequestsService {
     id: number,
     assignedUserId: number,
     actorUserId: number,
-    actorRoles: StaffRole[],
+    actorPermissions: StaffPermission[],
     automatic = false,
   ): Promise<TravelRequestRecord> {
     const recommendation = this.routing ? await this.routing.recommend(id) : null;
@@ -269,16 +324,14 @@ export class RequestsService {
         [assignedUserId],
       );
       const target = staffResult.rows[0];
-      if (!target || !target.roles.some((role) => role === "travel_agent" || role === "offshore_intake_employee")) {
-        throw new BadRequestException("Select an eligible Travel Agent or Offshore Intake Employee");
+      if (!target || !target.roles.some((role) => role === "travel_agent" || role === "supervisor_manager" || role === "offshore_intake_employee")) {
+        throw new BadRequestException("Select an eligible operational employee");
       }
 
-      const mayManageAssignments = actorRoles.some(
-        (role) => role === "system_administrator" || role === "offshore_intake_employee",
-      );
+      const mayManageAssignments = actorPermissions.includes("requests.assign_any");
       if (!mayManageAssignments) {
         const mayClaimSelf =
-          actorRoles.includes("travel_agent") &&
+          actorPermissions.includes("requests.assign_self") &&
           actorUserId === assignedUserId &&
           before.assignedUserId === null;
         if (!mayClaimSelf) {
@@ -326,12 +379,25 @@ export class RequestsService {
         : recommendation
           ? `${after.assignedUserName ?? "Selected staff"} was assigned manually instead of the recommendation for ${recommendation.recommendedUserName ?? "no available staff"}.`
           : `${after.assignedUserName ?? "Selected staff"} was assigned manually.`;
-      await client.query(
+      const assignmentEvent = await client.query<{ id: string }>(
         `INSERT INTO request_assignment_events
            (request_id, event_type, routing_level, staff_user_id, actor_user_id, explanation, recommendation_snapshot)
-         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING id::text`,
         [id, eventType, routingLevel, assignedUserId, actorUserId, explanation, JSON.stringify(recommendation ?? {})],
       );
+      const assignmentEventId = assignmentEvent.rows[0]?.id;
+      if (eventType === "override" && assignmentEventId) {
+        await client.query(
+          `INSERT INTO supervisor_review_items
+             (travel_request_id, review_type, summary, overridden_rule, reason,
+              occurred_by, source_type, source_id)
+           VALUES ($1, 'assignment_override', $2, $3, $4, $5, 'request_assignment_event', $6)
+           ON CONFLICT (source_type, source_id) WHERE source_type IS NOT NULL AND source_id IS NOT NULL DO NOTHING`,
+          [id, `${after.requestNumber} assignment recommendation overridden`,
+           recommendation?.explanation ?? "Automatic assignment recommendation",
+           explanation, actorUserId, assignmentEventId],
+        );
+      }
       await client.query(
         `INSERT INTO staff_notifications
            (user_id, notification_type, title, message, entity_type, entity_id, created_by)
@@ -395,16 +461,20 @@ export class RequestsService {
            (client_id, trip_summary, status, request_type_id, request_status_id,
             urgency_level_id, response_due_at, service_due_at, created_by, source_draft_intake_id,
             passenger_count, origin, destination, departure_date_text, return_date_text,
-            cabin_class, flexibility, special_requests)
+            cabin_class, flexibility, special_requests, resolved_departure_date,
+            departure_date_precision, resolved_return_date, return_date_precision)
          VALUES ($1, $2, 'new', $3, $4, $5,
                  CASE WHEN $6::int IS NULL THEN NULL ELSE now() + make_interval(mins => $6) END,
                  CASE WHEN $7::int IS NULL THEN NULL ELSE now() + make_interval(mins => $7) END,
-                 $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id`,
+                 $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+                 $18, $19, $20, $21) RETURNING id`,
         [clientId, tripSummary, typeId, statusId, urgency.id,
          urgency.response_deadline_minutes, urgency.service_deadline_minutes, actorUserId,
          sourceDraftIntakeId ?? null, details?.passengerCount ?? null, details?.origin ?? null,
          details?.destination ?? null, details?.departureDateText ?? null, details?.returnDateText ?? null,
-         details?.cabinClass ?? null, details?.flexibility ?? null, details?.specialRequests ?? null],
+         details?.cabinClass ?? null, details?.flexibility ?? null, details?.specialRequests ?? null,
+         details?.resolvedDepartureDate ?? null, details?.departureDatePrecision ?? null,
+         details?.resolvedReturnDate ?? null, details?.returnDatePrecision ?? null],
       );
       const id = inserted.rows[0]?.id;
       if (!id) throw new Error("Failed to create travel request");
@@ -425,7 +495,7 @@ export class RequestsService {
       if (this.routing) {
         const recommendation = await this.routing.recommend(id);
         if (recommendation.assignmentMode === "automatic" && recommendation.recommendedUserId && recommendation.routingLevel !== "escalation") {
-          return this.assign(id, recommendation.recommendedUserId, actorUserId, ["system_administrator"], true);
+          return this.assign(id, recommendation.recommendedUserId, actorUserId, ["requests.assign_any"], true);
         }
       }
       return created;

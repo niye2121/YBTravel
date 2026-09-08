@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { phaseOneRoleSchema, staffRoleSchema } from "./roles";
+import { staffPermissionSchema } from "./permissions";
 
 /**
  * The safe user shape — what the API returns and the frontend displays.
@@ -11,6 +12,7 @@ export const userSchema = z.object({
   name: z.string(),
   email: z.string().email(),
   roles: z.array(staffRoleSchema),
+  permissions: z.array(staffPermissionSchema),
   createdAt: z.string(),
 });
 export type User = z.infer<typeof userSchema>;
@@ -41,6 +43,7 @@ export const createUserSchema = z.object({
   phoneNumber: z.string().trim().regex(/^\+[1-9]\d{7,14}$/, "Use international format, for example +251911234567"),
   password: z.string().min(8, "Password must be at least 8 characters"),
   roles: z.array(phaseOneRoleSchema).min(1, "Select at least one role"),
+  permissions: z.array(staffPermissionSchema),
 }).merge(staffRoutingProfileInputSchema);
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 
@@ -73,6 +76,7 @@ export const updateEmployeeSchema = z.object({
   email: z.string().email(),
   phoneNumber: z.string().trim().regex(/^\+[1-9]\d{7,14}$/, "Use international format, for example +251911234567"),
   roles: z.array(phaseOneRoleSchema).min(1, "Select at least one role"),
+  permissions: z.array(staffPermissionSchema),
 }).merge(staffRoutingProfileInputSchema);
 export type UpdateEmployeeInput = z.infer<typeof updateEmployeeSchema>;
 

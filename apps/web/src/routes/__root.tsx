@@ -1,5 +1,7 @@
 import { Outlet, createRootRoute, redirect } from "@tanstack/react-router";
 import { getStoredUser } from "../lib/session";
+import { InboxAlerts } from "../lib/InboxAlerts";
+import { useAuth } from "../lib/AuthContext";
 
 /**
  * Runs before every route match. beforeLoad is outside the React tree, so
@@ -14,5 +16,10 @@ export const Route = createRootRoute({
       throw redirect({ to: "/login", search: { redirect: location.href } });
     }
   },
-  component: () => <Outlet />,
+  component: Root,
 });
+
+function Root() {
+  const { user } = useAuth();
+  return <InboxAlerts key={user?.id ?? "signed-out"}><Outlet /></InboxAlerts>;
+}

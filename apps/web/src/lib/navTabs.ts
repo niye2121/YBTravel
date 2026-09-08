@@ -1,5 +1,8 @@
+import type { StaffPermission } from "@yb-travel/shared";
+
 export type NavTab = {
   label: string;
+  permission?: StaffPermission;
   implementation?: {
     label: string;
     description: string;
@@ -7,12 +10,14 @@ export type NavTab = {
   to?:
     | "/"
     | "/inbox"
+    | "/reminders"
     | "/requests"
     | "/clients"
     | "/travellers"
     | "/bookings"
     | "/tickets"
-    | "/reports";
+    | "/reports"
+    | "/agents/workload";
 };
 
 /**
@@ -31,10 +36,11 @@ export type NavTab = {
  * screens shouldn't sit as their own top-level tab next to Reports.
  */
 export const NAV_TABS: NavTab[] = [
-  { label: "Inbox", to: "/inbox" },
-  { label: "Requests", to: "/requests" },
-  { label: "Clients", to: "/clients" },
-  { label: "Travellers", to: "/travellers" },
+  { label: "Inbox", to: "/inbox", permission: "whatsapp.read" },
+  { label: "Reminders", to: "/reminders", permission: "notifications.read" },
+  { label: "Requests", to: "/requests", permission: "requests.read" },
+  { label: "Clients", to: "/clients", permission: "clients.read" },
+  { label: "Travellers", to: "/travellers", permission: "travellers.read" },
   {
     label: "Bookings",
     to: "/bookings",
@@ -54,9 +60,6 @@ export const NAV_TABS: NavTab[] = [
   {
     label: "Reports",
     to: "/reports",
-    implementation: {
-      label: "Coming in Phase 8",
-      description: "Demonstration figures only. Live reporting is not implemented yet.",
-    },
+    permission: "workloads.manage",
   },
 ];

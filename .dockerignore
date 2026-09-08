@@ -11,3 +11,11 @@ node_modules
 **/.baileys-auth
 *.log
 .DS_Store
+.env
+.env.*
+**/.env
+**/.env.*
+backups
+**/backups
+*.local.md
+docs/design-qa

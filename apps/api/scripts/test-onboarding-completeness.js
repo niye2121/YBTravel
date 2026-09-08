@@ -3,6 +3,7 @@ require("dotenv").config();
 const assert = require("node:assert/strict");
 const { Pool } = require("pg");
 const { OnboardingService } = require("../dist/modules/clients/onboarding.service");
+const { ClientsService } = require("../dist/modules/clients/clients.service");
 
 async function main() {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -34,6 +35,17 @@ async function main() {
     assert.equal(clientStatus.tasks[0].status, "completed", "milestone task should be completable");
     assert.equal(clientStatus.canComplete, false, "client without a traveller must be incomplete");
 
+    async function expectBothStagesBlocked(reason) {
+      const before = (await db.query("SELECT count(*)::int AS count FROM client_onboarding_transitions WHERE client_id = $1", [clientId])).rows[0].count;
+      for (const [from, to] of [["information_received", "review_complete"], ["review_complete", "fully_onboarded"]]) {
+        await assert.rejects(() => service.applyStageTransition(db, clientId, from, to, null, actorId),
+          (error) => error.getStatus?.() === 400 && reason.test(error.message), `${to} must reject incomplete information`);
+      }
+      const after = (await db.query("SELECT count(*)::int AS count FROM client_onboarding_transitions WHERE client_id = $1", [clientId])).rows[0].count;
+      assert.equal(after, before, "rejected transitions must not add stage history");
+    }
+    await expectBothStagesBlocked(/Add at least one traveller/);
+
     const travellerId = (await db.query(
       `INSERT INTO travellers (name, dob, passport_status) VALUES ('Test Traveller', '1990-01-02', 'missing') RETURNING id`,
     )).rows[0].id;
@@ -47,11 +59,19 @@ async function main() {
     const dob = clientStatus.checklist.find((item) => item.fieldKey === "date_of_birth");
     assert.ok(legalNames?.present && !legalNames.reviewed, "legal name should be present but require review");
     assert.ok(dob?.present && !dob.reviewed, "date of birth should be present but require review");
+    await expectBothStagesBlocked(/needs review/);
+
+    await db.query("UPDATE travellers SET dob = NULL WHERE id = $1", [travellerId]);
+    await expectBothStagesBlocked(/Date of birth is missing/);
+    await db.query("UPDATE travellers SET dob = '1990-01-02' WHERE id = $1", [travellerId]);
 
     await service.reviewClientField(clientId, legalNames.requirementFieldId, "traveller", travellerId, actorId);
+    await expectBothStagesBlocked(/Date of birth needs review/);
     clientStatus = await service.reviewClientField(clientId, dob.requirementFieldId, "traveller", travellerId, actorId);
     assert.equal(clientStatus.canComplete, true, "reviewing all required traveller data should clear the gate");
 
+    await db.query("UPDATE clients SET stage = 'information_received' WHERE id = $1", [clientId]);
+    await service.applyStageTransition(db, clientId, "information_received", "review_complete", null, actorId);
     await db.query("UPDATE clients SET stage = 'review_complete' WHERE id = $1", [clientId]);
     await service.applyStageTransition(db, clientId, "review_complete", "fully_onboarded", null, actorId);
 
@@ -59,6 +79,58 @@ async function main() {
     clientStatus = await service.getClientStatus(clientId, db);
     assert.equal(clientStatus.canComplete, false, "editing a reviewed value must invalidate the old review");
     assert.ok(clientStatus.missingItems.some((item) => item.includes("Date of birth") && item.includes("needs review")));
+    await expectBothStagesBlocked(/Date of birth needs review/);
+    await service.reviewClientField(clientId, dob.requirementFieldId, "traveller", travellerId, actorId);
+
+    // Newly linked family members must also pass the checklist.
+    const childId = (await db.query("INSERT INTO travellers (name, dob) VALUES ('Unreviewed Child', '2020-01-02') RETURNING id")).rows[0].id;
+    await db.query("INSERT INTO traveller_accounts (client_id, traveller_id, relationship) VALUES ($1, $2, 'child')", [clientId, childId]);
+    await expectBothStagesBlocked(/Unreviewed Child/);
+    for (const item of (await service.getClientStatus(clientId, db)).checklist.filter((item) => item.entityId === childId && item.requiresReview)) {
+      await service.reviewClientField(clientId, item.requirementFieldId, "traveller", childId, actorId);
+    }
+
+    // Passport is optional unless the administrator configures it as required.
+    // This rule and all test changes exist only inside the rolled-back transaction.
+    const passportRuleId = (await db.query(`INSERT INTO required_information_fields
+      (entity_type, field_key, label, required, requires_review, position)
+      VALUES ('traveller', 'passport_number', 'Passport number', true, true, 25)
+      ON CONFLICT (entity_type, field_key) DO UPDATE SET required=true, requires_review=true, active=true
+      RETURNING id`)).rows[0].id;
+    await expectBothStagesBlocked(/Passport number is missing/);
+    for (const id of [travellerId, childId]) {
+      await db.query("UPDATE travellers SET passport_number = $2 WHERE id = $1", [id, `TEST-${id}`]);
+      await service.reviewClientField(clientId, passportRuleId, "traveller", id, actorId);
+    }
+
+    // Validate actual client updates atomically, including a field edited in the
+    // same submission as the stage change. Map inner transactions to savepoints.
+    const adapter = { query: (...args) => db.query(...args), connect: async () => ({
+      release() {}, query: (sql, args) => db.query(sql === "BEGIN" ? "SAVEPOINT client_update"
+        : sql === "COMMIT" ? "RELEASE SAVEPOINT client_update"
+        : sql === "ROLLBACK" ? "ROLLBACK TO SAVEPOINT client_update" : sql, args),
+    }) };
+    const clients = new ClientsService(adapter, service);
+    const clientRuleId = (await db.query(`INSERT INTO required_information_fields
+      (entity_type, field_key, label, required, requires_review, position)
+      VALUES ('client', 'name', 'Client name', true, true, 5)
+      ON CONFLICT (entity_type, field_key) DO UPDATE SET required=true, requires_review=true, active=true
+      RETURNING id`)).rows[0].id;
+    await expectBothStagesBlocked(/Client name needs review/);
+    await service.reviewClientField(clientId, clientRuleId, "client", clientId, actorId);
+    await db.query("UPDATE clients SET stage = 'information_received' WHERE id = $1", [clientId]);
+    const original = (await db.query("SELECT name, phone_number FROM clients WHERE id = $1", [clientId])).rows[0];
+    const input = { name: original.name, phoneNumber: original.phone_number, clientType: "individual",
+      bookingFeeGroupId: feeGroupId, preferredRepId: null, secondaryRepId: null, stage: "review_complete" };
+    await assert.rejects(() => clients.update(clientId, { ...input, name: "Changed during review" }, actorId), /Client name needs review/);
+    assert.deepEqual((await db.query("SELECT name, stage FROM clients WHERE id = $1", [clientId])).rows[0],
+      {name: original.name, stage: "information_received"}, "failed transition must roll back the entire profile edit");
+    assert.equal((await clients.update(clientId, input, actorId)).stage, "review_complete");
+    await db.query("UPDATE travellers SET dob = NULL WHERE id = $1", [childId]);
+    await assert.rejects(() => clients.update(clientId, { ...input, stage: "fully_onboarded" }, actorId), /Date of birth is missing/);
+    assert.equal((await db.query("SELECT stage FROM clients WHERE id=$1", [clientId])).rows[0].stage, "review_complete");
+    await db.query("UPDATE travellers SET dob = '2020-01-02' WHERE id=$1", [childId]);
+    assert.equal((await clients.update(clientId, { ...input, stage: "fully_onboarded" }, actorId)).stage, "fully_onboarded");
 
     const catalogues = await db.query(
       `SELECT
@@ -86,7 +158,7 @@ async function main() {
     }
     assert.equal(requestStatus.complete, true, "completed and reviewed required request data should pass");
 
-    console.log("Onboarding transitions, tasks, completeness, review invalidation, and request-information checks passed");
+    console.log("Both onboarding gates, missing/unreviewed/changed fields, linked travellers, configurable passport requirements, atomic profile updates, tasks and request-information checks passed");
   } finally {
     await db.query("ROLLBACK");
     db.release();

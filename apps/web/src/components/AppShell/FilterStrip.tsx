@@ -9,12 +9,10 @@ type FilterStripProps = {
   compact?: boolean;
 };
 
-export function FilterStrip({ filters, active, onChange, compact = false }: FilterStripProps) {
+export function FilterStrip({ filters, active, onChange }: FilterStripProps) {
   return (
     <div
-      className={`flex items-stretch border-b border-yb-line-head bg-white ${
-        compact ? "h-[30px] gap-[22px] px-[16px]" : "h-[40px] gap-[26px] px-[22px]"
-      }`}
+      className="flex h-[44px] items-stretch gap-[24px] overflow-x-auto border-b border-yb-line-head bg-white px-[24px]"
     >
       {filters.map(([label, count, implementation]) => {
         const isActive = active === label;
@@ -23,19 +21,17 @@ export function FilterStrip({ filters, active, onChange, compact = false }: Filt
             key={label}
             type="button"
             onClick={() => onChange(label)}
-            className={`group/status-parent mb-[-1px] flex items-center border-b-[3px] px-[2px] ${
-              compact ? "gap-[6px] text-[12px]" : "gap-[7px] text-[14px]"
-            } ${
+            className={`group/status-parent flex shrink-0 items-center gap-[7px] whitespace-nowrap border-b-2 text-[13.5px] ${
               isActive
-                ? "border-yb-green font-bold text-[#12352a]"
+                ? "border-yb-green font-semibold text-yb-green"
                 : "border-transparent font-normal text-yb-muted"
             }`}
           >
             <span>{label}</span>
             {implementation && <ImplementationStatusIcon {...implementation} withinInteractiveControl />}
             <span
-              className={`${compact ? "text-[12px] font-normal" : "text-[13px] font-bold"} ${
-                isActive ? "text-yb-gold-count" : "text-yb-muted5"
+              className={`text-[11px] font-normal ${
+                isActive ? "rounded-full bg-yb-green px-[7px] py-px text-white" : "text-yb-muted5"
               }`}
             >
               {count}

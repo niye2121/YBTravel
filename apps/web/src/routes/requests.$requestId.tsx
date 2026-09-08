@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
 import { AppHeader } from "../components/AppShell/AppHeader";
 import { GROUPS, money, type RequestRow } from "../data/requestsData";
@@ -7,8 +7,14 @@ import { useAuth } from "../lib/AuthContext";
 import { bookingFeesApi, messagingApi, requestsApi, type PassengerCategory, type RequestDetailsInput } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
 import { EntityRecordsPanel } from "../components/EntityRecordsPanel";
+import { getStoredUser, hasPermission } from "../lib/session";
 
-export const Route = createFileRoute("/requests/$requestId")({ component: RequestDetailPage });
+export const Route = createFileRoute("/requests/$requestId")({
+  beforeLoad: () => {
+    if (!hasPermission(getStoredUser(), "requests.read")) throw redirect({ to: "/" });
+  },
+  component: RequestDetailPage,
+});
 
 function dateTimeLabel(value: string | null): string {
   if (!value) return "Not configured";
@@ -45,23 +51,23 @@ function DemoRequestDetail({ request }: { request: RequestRow }) {
         <div>
           <div className="text-[10px] uppercase tracking-[0.14em] text-[#6c766f]">Demonstration request</div>
           <div className="flex items-baseline gap-[9px]">
-            <h1 className="text-[24px] font-bold tracking-[-0.01em]">{request.id}</h1>
+            <h1 className="yb-page-title">{request.id}</h1>
             <span className="border border-[#dbc67d] bg-[#fff7dc] px-[7px] py-[2px] text-[10.5px] font-bold text-[#765c08]">DEMO</span>
           </div>
         </div>
         <div className="flex-1" />
-        <Link to="/requests" className="border border-[#8d968e] bg-white px-[14px] py-[6px] text-[12px] hover:bg-[#f0f2ed]">Back to Requests</Link>
+        <Link to="/requests" className="border border-yb-line-btn bg-white px-[14px] py-[6px] text-[12px] hover:bg-[#f0f2ed]">Back to Requests</Link>
       </header>
 
-      <section className="border border-[#c3cbc2] border-t-[3px] border-t-[#0d5c39] bg-white">
-        <div className="border-b border-[#d7dcd5] px-[16px] py-[10px]">
+      <section className="yb-card border border-yb-line border-t-[3px] border-t-[#0d5c39] bg-white">
+        <div className="border-b border-yb-line px-[16px] py-[10px]">
           <div className="text-[14px] font-bold">Request details</div>
           <div className="mt-[2px] text-[11px] text-[#6c766f]">Read-only demonstration data; this is not a database request.</div>
         </div>
         <div className="grid grid-cols-[minmax(0,1fr)_300px]">
           <div className="min-w-0 px-[20px] py-[18px]">
-            <div className="mb-[15px] border-b border-[#d7dcd5] pb-[5px] text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Trip request</div>
-            <div className="mb-[20px] border border-[#d7dcd5] bg-[#f9faf8] px-[13px] py-[12px] text-[14px] leading-[20px] text-[#2c332d]">{request.trip}</div>
+            <div className="mb-[15px] border-b border-yb-line pb-[5px] text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Trip request</div>
+            <div className="mb-[20px] border border-yb-line bg-yb-panel-head px-[13px] py-[12px] text-[14px] leading-[20px] text-[#2c332d]">{request.trip}</div>
             <div className="grid grid-cols-3 gap-x-[28px] gap-y-[18px]">
               <DetailField label="Client">{request.client}</DetailField>
               <DetailField label="Stage">{request.stage}</DetailField>
@@ -71,7 +77,7 @@ function DemoRequestDetail({ request }: { request: RequestRow }) {
               <DetailField label="Fare">{fare}</DetailField>
             </div>
           </div>
-          <aside className="border-l border-[#d7dcd5] bg-[#f9faf8] px-[16px] py-[15px]">
+          <aside className="border-l border-yb-line bg-yb-panel-head px-[16px] py-[15px]">
             <div className="mb-[8px] text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Current workflow</div>
             <div className="mb-[13px] border border-[#b9d2c1] bg-[#edf7f0] px-[10px] py-[8px] text-[12px] font-bold text-[#0b5c3b]">{request.stage}</div>
             <DetailField label="Deadline">{deadline}</DetailField>
@@ -83,7 +89,7 @@ function DemoRequestDetail({ request }: { request: RequestRow }) {
 }
 
 function RequestDetailPage() {
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const queryClient = useQueryClient();
   const { requestId: requestIdParam } = Route.useParams();
   const requestId = Number(requestIdParam);
@@ -120,13 +126,17 @@ function RequestDetailPage() {
   const bookingFeeQuery = useQuery({
     queryKey: ["requests", requestId, "booking-fee"],
     queryFn: () => bookingFeesApi.getRequestFee(requestId),
-    enabled: Boolean(request), retry: false,
+    enabled: Boolean(request && can("fees.read")), retry: false,
   });
-  const mayManageAssignments = user?.roles.some(
-    (role) => role === "system_administrator" || role === "offshore_intake_employee",
-  ) ?? false;
+  const mayManageAssignments = user?.permissions?.includes("requests.assign_any") ?? false;
+  const mayManageRequest = Boolean(
+    request && user && (mayManageAssignments || request.assignedUserId === user.id),
+  );
+  const mayUpdateRequest = Boolean(mayManageRequest && user?.permissions?.includes("requests.update"));
+  const mayCalculateFee = Boolean(mayManageRequest && user?.permissions?.includes("fees.calculate"));
+  const maySendReply = Boolean(mayManageRequest && user?.permissions?.includes("whatsapp.send"));
   const mayClaimSelf = Boolean(
-    user?.roles.includes("travel_agent") && request && request.assignedUserId === null,
+    user?.permissions?.includes("requests.assign_self") && request && request.assignedUserId === null,
   );
   const staffQuery = useQuery({
     queryKey: ["requests", "assignable-staff"],
@@ -136,7 +146,7 @@ function RequestDetailPage() {
   const recommendationQuery = useQuery({
     queryKey: ["requests", requestId, "assignment-recommendation"],
     queryFn: () => requestsApi.getAssignmentRecommendation(requestId),
-    enabled: Boolean(request && user),
+    enabled: Boolean(request && (mayManageAssignments || can("requests.assign_self"))),
     retry: false,
   });
   const assignmentHistoryQuery = useQuery({
@@ -218,7 +228,7 @@ function RequestDetailPage() {
   }, [bookingFeeQuery.data]);
 
   return (
-    <div className="yb-reference-scale min-h-screen min-w-[1180px] bg-[#eef0ea] font-[Helvetica,Arial,sans-serif] leading-[1.25] text-[#1c1f1b]">
+    <div className="min-h-screen min-w-[1180px] bg-yb-canvas font-sans leading-[1.25] text-yb-ink">
       <AppHeader tabs={NAV_TABS} query={query} onQueryChange={setQuery} compact />
 
       <main className="px-[16px] pt-[14px] pb-[40px]">
@@ -229,12 +239,12 @@ function RequestDetailPage() {
         </div>
 
         {isDatabaseRequest && requestQuery.isLoading && (
-          <div className="border border-[#c3cbc2] bg-white p-[24px] text-[13px] text-[#6c766f]">Loading request…</div>
+          <div className="border border-yb-line bg-white p-[24px] text-[13px] text-[#6c766f]">Loading request…</div>
         )}
 
         {!demoRequest && !requestQuery.isLoading && (!isDatabaseRequest || requestQuery.isError || !request) && (
-          <div className="border border-[#c3cbc2] bg-white p-[24px]">
-            <h1 className="mb-[6px] text-[22px] font-bold">Request not found</h1>
+          <div className="border border-yb-line bg-white p-[24px]">
+            <h1 className="mb-[6px] yb-page-title">Request not found</h1>
             <p className="mb-[14px] text-[13px] text-[#6c766f]">This request may no longer exist.</p>
             <Link to="/requests" className="text-[13px] font-bold text-[#0b5c3b] underline">Return to Requests</Link>
           </div>
@@ -251,33 +261,38 @@ function RequestDetailPage() {
               <div>
                 <div className="text-[10px] uppercase tracking-[0.14em] text-[#6c766f]">Travel request</div>
                 <div className="flex items-baseline gap-[9px]">
-                  <h1 className="text-[24px] font-bold tracking-[-0.01em]">{request.requestNumber}</h1>
+                  <h1 className="yb-page-title">{request.requestNumber}</h1>
                   <span className="border border-[#b9d2c1] bg-[#edf7f0] px-[7px] py-[2px] text-[10.5px] font-bold text-[#0b5c3b]">
                     {request.requestStatusName}
                   </span>
                 </div>
               </div>
               <div className="flex-1" />
-              <Link to="/requests" className="border border-[#8d968e] bg-white px-[14px] py-[6px] text-[12px] hover:bg-[#f0f2ed]">Back to Requests</Link>
+              <Link to="/requests" className="border border-yb-line-btn bg-white px-[14px] py-[6px] text-[12px] hover:bg-[#f0f2ed]">Back to Requests</Link>
             </header>
 
-            <section className="border border-[#c3cbc2] border-t-[3px] border-t-[#0d5c39] bg-white">
-              <div className="flex items-center gap-[10px] border-b border-[#d7dcd5] px-[16px] py-[10px]">
+            <section className="yb-card border border-yb-line border-t-[3px] border-t-[#0d5c39] bg-white">
+              <div className="flex items-center gap-[10px] border-b border-yb-line px-[16px] py-[10px]">
                 <div className="text-[14px] font-bold">Request details</div>
                 <div className="text-[11px] text-[#6c766f]">Created {dateTimeLabel(request.createdAt)}</div>
               </div>
 
               <div className="grid grid-cols-[minmax(0,1fr)_300px]">
                 <div className="min-w-0 px-[20px] py-[18px]">
-                  <div className="mb-[15px] border-b border-[#d7dcd5] pb-[5px] text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Trip request</div>
-                  <div className="mb-[20px] border border-[#d7dcd5] bg-[#f9faf8] px-[13px] py-[12px] text-[14px] leading-[20px] text-[#2c332d]">
+                  {!mayManageRequest && (
+                    <div className="mb-[14px] border border-[#dbc67d] bg-[#fff7dc] px-[11px] py-[8px] text-[11px] text-[#765c08]">
+                      Read-only request. Claim it if unassigned, or ask an assignment manager to reassign it to you.
+                    </div>
+                  )}
+                  <div className="mb-[15px] border-b border-yb-line pb-[5px] text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Trip request</div>
+                  <div className="mb-[20px] border border-yb-line bg-yb-panel-head px-[13px] py-[12px] text-[14px] leading-[20px] text-[#2c332d]">
                     {request.tripSummary}
                   </div>
                   <div className="grid grid-cols-3 gap-x-[28px] gap-y-[18px]">
                     <DetailField label="Client">
-                      <Link to="/clients/$clientId" params={{ clientId: String(request.clientId) }} className="font-bold text-[#0b5c3b] underline">
+                      {can("clients.read") ? <Link to="/clients/$clientId" params={{ clientId: String(request.clientId) }} className="font-bold text-[#0b5c3b] underline">
                         {request.clientName}
-                      </Link>
+                      </Link> : <span className="font-bold">{request.clientName}</span>}
                     </DetailField>
                     <DetailField label="Request type">{request.requestTypeName}</DetailField>
                     <DetailField label="Urgency">{request.urgencyName}</DetailField>
@@ -286,18 +301,18 @@ function RequestDetailPage() {
                     <DetailField label="Created">{dateTimeLabel(request.createdAt)}</DetailField>
                   </div>
 
-                  <div className="mt-[22px] border-t border-[#d7dcd5] pt-[16px]">
+                  <div className="mt-[22px] border-t border-yb-line pt-[16px]">
                     <div className="flex items-start gap-[10px]">
                       <div>
                         <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Travel information</div>
                         <div className="mt-[3px] text-[11px] text-[#6c766f]">Complete the structured details, then confirm any fields that require staff review.</div>
                       </div>
                       <div className="flex-1" />
-                      <button type="button" onClick={() => setEditingDetails((value) => !value)} className="border border-[#8d968e] bg-white px-[11px] py-[5px] text-[11px] font-bold text-[#2c332d] hover:bg-[#f0f2ed]">{editingDetails ? "Cancel" : "Edit information"}</button>
+                      {mayUpdateRequest && <button type="button" onClick={() => setEditingDetails((value) => !value)} className="border border-yb-line-btn bg-white px-[11px] py-[5px] text-[11px] font-bold text-[#2c332d] hover:bg-[#f0f2ed]">{editingDetails ? "Cancel" : "Edit information"}</button>}
                     </div>
 
                     {editingDetails ? (
-                      <form className="mt-[10px] grid grid-cols-3 gap-[10px] border border-[#cbd3ca] bg-[#f9faf8] p-[12px]" onSubmit={(event) => { event.preventDefault(); updateDetailsMutation.mutate(details); }}>
+                      <form className="mt-[10px] grid grid-cols-3 gap-[10px] border border-[#cbd3ca] bg-yb-panel-head p-[12px]" onSubmit={(event) => { event.preventDefault(); updateDetailsMutation.mutate(details); }}>
                         <label className="text-[11px] font-bold">Passengers<input type="number" min={1} max={100} value={details.passengerCount ?? ""} onChange={(event) => setDetails({ ...details, passengerCount: event.target.value ? Number(event.target.value) : null })} className="mt-[4px] h-[30px] w-full border border-[#9aa29a] bg-white px-[7px] text-[12px] font-normal" /></label>
                         <label className="text-[11px] font-bold">Origin<input value={details.origin ?? ""} onChange={(event) => setDetails({ ...details, origin: event.target.value || null })} placeholder="JFK / New York" className="mt-[4px] h-[30px] w-full border border-[#9aa29a] bg-white px-[7px] text-[12px] font-normal" /></label>
                         <label className="text-[11px] font-bold">Destination<input value={details.destination ?? ""} onChange={(event) => setDetails({ ...details, destination: event.target.value || null })} placeholder="TLV / Tel Aviv" className="mt-[4px] h-[30px] w-full border border-[#9aa29a] bg-white px-[7px] text-[12px] font-normal" /></label>
@@ -312,7 +327,7 @@ function RequestDetailPage() {
                         </div>
                       </form>
                     ) : (
-                      <div className="mt-[10px] grid grid-cols-4 gap-x-[18px] gap-y-[12px] border border-[#d7dcd5] bg-[#f9faf8] p-[12px]">
+                      <div className="mt-[10px] grid grid-cols-4 gap-x-[18px] gap-y-[12px] border border-yb-line bg-yb-panel-head p-[12px]">
                         <DetailField label="Passengers">{request.passengerCount ?? "—"}</DetailField>
                         <DetailField label="Origin">{request.origin ?? "—"}</DetailField>
                         <DetailField label="Destination">{request.destination ?? "—"}</DetailField>
@@ -325,54 +340,54 @@ function RequestDetailPage() {
                     )}
 
                     {informationQuery.data && (
-                      <div className="mt-[10px] border border-[#d7dcd5]">
-                        <div className="flex items-center bg-[#eff2ec] px-[10px] py-[6px]">
+                      <div className="mt-[10px] border border-yb-line">
+                        <div className="flex items-center bg-yb-panel-head px-[10px] py-[6px]">
                           <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#5c665e]">Information checklist</div>
                           <div className="flex-1" />
                           <span className={`px-[6px] py-[2px] text-[9.5px] font-bold ${informationQuery.data.complete ? "bg-[#e8f5eb] text-[#0b5c3b]" : "bg-[#fff3d5] text-[#7b5b00]"}`}>{informationQuery.data.complete ? "COMPLETE" : `${informationQuery.data.missingItems.length} ACTIONS NEEDED`}</span>
                         </div>
                         {informationQuery.data.checklist.map((item) => (
-                          <div key={item.requirementFieldId} className="flex items-center gap-[9px] border-t border-[#edf0ea] px-[10px] py-[7px]">
+                          <div key={item.requirementFieldId} className="flex items-center gap-[9px] border-t border-yb-line-row px-[10px] py-[7px]">
                             <span className={`h-[8px] w-[8px] rounded-full ${!item.required && !item.present ? "bg-[#aab1aa]" : item.satisfied ? "bg-[#249155]" : item.present ? "bg-[#d89b13]" : "bg-[#b63a2b]"}`} />
                             <div className="min-w-0 flex-1">
                               <div className="text-[11.5px] font-bold">{item.label}</div>
                               <div className="truncate text-[10px] text-[#6c766f]">{item.present ? item.valueSummary : item.required ? "Missing" : "Optional · not provided"}{item.reviewed ? ` · reviewed${item.reviewedByName ? ` by ${item.reviewedByName}` : ""}` : item.present && item.requiresReview ? " · review required" : ""}</div>
                             </div>
-                            {item.present && item.requiresReview && !item.reviewed && <button type="button" disabled={reviewInformationMutation.isPending} onClick={() => reviewInformationMutation.mutate(item.requirementFieldId)} className="border border-[#0b5c3b] bg-white px-[8px] py-[4px] text-[10px] font-bold text-[#0b5c3b] disabled:opacity-50">Confirm reviewed</button>}
+                            {mayUpdateRequest && item.present && item.requiresReview && !item.reviewed && <button type="button" disabled={reviewInformationMutation.isPending} onClick={() => reviewInformationMutation.mutate(item.requirementFieldId)} className="border border-[#0b5c3b] bg-white px-[8px] py-[4px] text-[10px] font-bold text-[#0b5c3b] disabled:opacity-50">Confirm reviewed</button>}
                           </div>
                         ))}
-                        <div className="border-t border-[#d7dcd5] bg-[#fafbf9] px-[10px] py-[6px] text-[10.5px] font-bold text-[#59635b]">Next: {informationQuery.data.nextAction}</div>
+                        <div className="border-t border-yb-line bg-[#fafbf9] px-[10px] py-[6px] text-[10.5px] font-bold text-[#59635b]">Next: {informationQuery.data.nextAction}</div>
                       </div>
                     )}
                     {informationQuery.isError && <div className="mt-[8px] text-[11px] text-[#b3261e]">Information checklist could not be loaded.</div>}
                     {reviewInformationMutation.isError && <div className="mt-[8px] text-[11px] text-[#b3261e]">{reviewInformationMutation.error instanceof Error ? reviewInformationMutation.error.message : "Review could not be saved"}</div>}
                   </div>
 
-                  <div className="mt-[22px] border-t border-[#d7dcd5] pt-[16px]">
+                  {can("fees.read") && <div className="mt-[22px] border-t border-yb-line pt-[16px]">
                     <div className="flex items-start gap-[10px]"><div><div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Booking fee by passenger</div><div className="mt-[3px] text-[11px] text-[#6c766f]">Select the travellers on this request and confirm their fee category. Saving creates a dated fee snapshot.</div></div><div className="flex-1" />
                       {bookingFeeQuery.data && <div className="text-right"><div className="text-[10px] text-[#6c766f]">{bookingFeeQuery.data.feeGroup.name} · {bookingFeeQuery.data.feeGroup.calculationBasis.replace("_", " ")}</div><div className="text-[18px] font-bold text-[#0b5c3b]">{bookingFeeQuery.data.currency} {bookingFeeQuery.data.totalAmount}</div></div>}
                     </div>
                     {bookingFeeQuery.isLoading && <div className="mt-[9px] text-[11px] text-[#6c766f]">Loading client travellers and fee rule…</div>}
                     {bookingFeeQuery.isError && <div className="mt-[9px] text-[11px] text-[#b3261e]">The client needs a valid booking-fee group before this can be calculated.</div>}
                     {bookingFeeQuery.data && (
-                      <div className="mt-[10px] border border-[#d7dcd5]">
+                      <div className="mt-[10px] border border-yb-line">
                         {bookingFeeQuery.data.availableTravellers.map((traveller) => {
                           const category = feePassengers[traveller.id];
-                          return <div key={traveller.id} className="flex items-center gap-[10px] border-b border-[#edf0ea] px-[10px] py-[7px] last:border-b-0">
-                            <input aria-label={`Include ${traveller.name}`} type="checkbox" checked={Boolean(category)} onChange={(event) => setFeePassengers((current) => { const next = { ...current }; if (event.target.checked) next[traveller.id] = "adult"; else delete next[traveller.id]; return next; })} />
+                          return <div key={traveller.id} className="flex items-center gap-[10px] border-b border-yb-line-row px-[10px] py-[7px] last:border-b-0">
+                            {mayCalculateFee && <input aria-label={`Include ${traveller.name}`} type="checkbox" checked={Boolean(category)} onChange={(event) => setFeePassengers((current) => { const next = { ...current }; if (event.target.checked) next[traveller.id] = "adult"; else delete next[traveller.id]; return next; })} />}
                             <div className="min-w-0 flex-1"><div className="text-[11.5px] font-bold">{traveller.name}</div><div className="text-[9.5px] text-[#6c766f]">DOB {traveller.dob ?? "not recorded"}</div></div>
-                            <select aria-label={`${traveller.name} passenger category`} disabled={!category} value={category ?? "adult"} onChange={(event) => setFeePassengers((current) => ({ ...current, [traveller.id]: event.target.value as PassengerCategory }))} className="h-[28px] border border-[#9aa29a] bg-white px-[7px] text-[10.5px]"><option value="adult">Adult</option><option value="child">Child</option><option value="infant">Infant</option></select>
+                            {mayCalculateFee ? <select aria-label={`${traveller.name} passenger category`} disabled={!category} value={category ?? "adult"} onChange={(event) => setFeePassengers((current) => ({ ...current, [traveller.id]: event.target.value as PassengerCategory }))} className="h-[28px] border border-[#9aa29a] bg-white px-[7px] text-[10.5px]"><option value="adult">Adult</option><option value="child">Child</option><option value="infant">Infant</option></select> : category && <div className="text-[10.5px] capitalize">{category}</div>}
                             {bookingFeeQuery.data.passengers.find((item) => item.travellerId === traveller.id) && <div className="w-[95px] text-right text-[10.5px] font-bold">{bookingFeeQuery.data.currency} {bookingFeeQuery.data.passengers.find((item) => item.travellerId === traveller.id)!.feeAmount}</div>}
                           </div>;
                         })}
                         {bookingFeeQuery.data.availableTravellers.length === 0 && <div className="p-[10px] text-[11px] text-[#6c766f]">Add travellers to the client profile first.</div>}
-                        <div className="flex items-center border-t border-[#d7dcd5] bg-[#f9faf8] px-[10px] py-[7px]"><div className="text-[10px] text-[#6c766f]">{bookingFeeQuery.data.calculatedAt ? `Last calculated ${dateTimeLabel(bookingFeeQuery.data.calculatedAt)}` : "Not calculated yet"}</div><div className="flex-1" /><button type="button" disabled={Object.keys(feePassengers).length === 0 || bookingFeeMutation.isPending} onClick={() => bookingFeeMutation.mutate()} className="h-[29px] bg-[#0b5c3b] px-[12px] text-[10.5px] font-bold text-white disabled:opacity-50">{bookingFeeMutation.isPending ? "Calculating…" : "Save fee calculation"}</button></div>
+                        <div className="flex items-center border-t border-yb-line bg-yb-panel-head px-[10px] py-[7px]"><div className="text-[10px] text-[#6c766f]">{bookingFeeQuery.data.calculatedAt ? `Last calculated ${dateTimeLabel(bookingFeeQuery.data.calculatedAt)}` : "Not calculated yet"}</div><div className="flex-1" />{mayCalculateFee && <button type="button" disabled={Object.keys(feePassengers).length === 0 || bookingFeeMutation.isPending} onClick={() => bookingFeeMutation.mutate()} className="h-[29px] bg-[#0b5c3b] px-[12px] text-[10.5px] font-bold text-white disabled:opacity-50">{bookingFeeMutation.isPending ? "Calculating…" : "Save fee calculation"}</button>}</div>
                       </div>
                     )}
                     {bookingFeeMutation.isError && <div className="mt-[7px] text-[11px] text-[#b3261e]">{bookingFeeMutation.error instanceof Error ? bookingFeeMutation.error.message : "Fee calculation failed"}</div>}
-                  </div>
+                  </div>}
 
-                  <div className="mt-[22px] border-t border-[#d7dcd5] pt-[16px]">
+                  <div className="mt-[22px] border-t border-yb-line pt-[16px]">
                     <div className="flex items-start gap-[12px]">
                       <div>
                         <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Proposed answer to client</div>
@@ -385,7 +400,7 @@ function RequestDetailPage() {
                         <div className="text-[11px] text-[#6c766f]">WhatsApp: {request.clientWhatsAppNumber.startsWith("+") ? request.clientWhatsAppNumber : `+${request.clientWhatsAppNumber}`}</div>
                       )}
                     </div>
-                    <textarea
+                    {maySendReply ? <textarea
                       rows={6}
                       value={proposedReply}
                       onChange={(event) => {
@@ -395,7 +410,7 @@ function RequestDetailPage() {
                       placeholder="Write the reviewed response to the client…"
                       aria-label="Proposed answer to client"
                       className="mt-[9px] min-h-[118px] w-full resize-y border border-[#9aa29a] bg-white px-[10px] py-[8px] text-[13px] leading-[19px] outline-none focus:border-[#0b5c3b]"
-                    />
+                    /> : <div className="mt-[9px] min-h-[80px] whitespace-pre-wrap border border-yb-line bg-yb-panel-head px-[10px] py-[8px] text-[13px] leading-[19px] text-[#59635b]">{proposedReply || "No proposed answer has been prepared."}</div>}
                     <div className="mt-[8px] flex items-center gap-[10px]">
                       {request.sourceConversationId ? (
                         <div className="text-[10.5px] text-[#6c766f]">Explicit staff action required. Sending adds the message to the linked Inbox conversation.</div>
@@ -404,14 +419,14 @@ function RequestDetailPage() {
                       )}
                       <div className="flex-1" />
                       {sendReplyMutation.isSuccess && <div className="text-[11.5px] font-bold text-[#0b5c3b]">Sent to client</div>}
-                      <button
+                      {maySendReply && <button
                         type="button"
                         disabled={!request.sourceConversationId || proposedReply.trim().length === 0 || sendReplyMutation.isPending || sendReplyMutation.isSuccess}
                         onClick={() => sendReplyMutation.mutate(proposedReply.trim())}
                         className="h-[32px] bg-[#0b5c3b] px-[15px] text-[11.5px] font-bold text-white hover:bg-[#084a30] disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {sendReplyMutation.isPending ? "Sending…" : "Send to client"}
-                      </button>
+                      </button>}
                     </div>
                     {sendReplyMutation.isError && (
                       <div role="alert" className="mt-[7px] text-[11px] leading-[15px] text-[#b3261e]">
@@ -421,13 +436,13 @@ function RequestDetailPage() {
                   </div>
                 </div>
 
-                <aside className="border-l border-[#d7dcd5] bg-[#f9faf8] px-[16px] py-[15px]">
+                <aside className="border-l border-yb-line bg-yb-panel-head px-[16px] py-[15px]">
                   <div className="mb-[8px] text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Current workflow</div>
                   <div className="mb-[13px] border border-[#b9d2c1] bg-[#edf7f0] px-[10px] py-[8px] text-[12px] font-bold text-[#0b5c3b]">{request.requestStatusName}</div>
                   <DetailField label="Priority">{request.urgencyName}</DetailField>
-                  <div className="mt-[17px] border-t border-[#d7dcd5] pt-[12px]">
+                  <div className="mt-[17px] border-t border-yb-line pt-[12px]">
                     <div className="mb-[7px] text-[10px] font-bold uppercase tracking-[0.12em] text-[#5c665e]">Assigned staff</div>
-                    <div className="mb-[7px] inline-flex border border-[#c3cbc2] bg-white px-[7px] py-[3px] text-[10px] font-bold uppercase tracking-[0.08em] text-[#59635b]">
+                    <div className="mb-[7px] inline-flex border border-yb-line bg-white px-[7px] py-[3px] text-[10px] font-bold uppercase tracking-[0.08em] text-[#59635b]">
                       Assignment: {request.assignmentStatus.replaceAll("_", " ")}
                     </div>
                     <div className="text-[13px] font-bold text-[#2c332d]">{request.assignedUserName ?? "Unassigned"}</div>
@@ -495,7 +510,7 @@ function RequestDetailPage() {
                     )}
 
                     {(assignmentHistoryQuery.data?.length ?? 0) > 0 && (
-                      <div className="mt-[12px] border-t border-[#d7dcd5] pt-[9px]">
+                      <div className="mt-[12px] border-t border-yb-line pt-[9px]">
                         <div className="mb-[6px] text-[10px] font-bold uppercase tracking-[0.1em] text-[#5c665e]">Assignment history</div>
                         {assignmentHistoryQuery.data?.slice(0, 4).map((event) => (
                           <div key={event.id} className="mb-[7px] border-l-2 border-[#b9d2c1] pl-[7px]">
@@ -507,9 +522,9 @@ function RequestDetailPage() {
                       </div>
                     )}
                   </div>
-                  <div className="mt-[17px] border-t border-[#d7dcd5] pt-[12px]">
+                  <div className="mt-[17px] border-t border-yb-line pt-[12px]">
                     <div className="flex flex-col gap-[6px]">
-                      {request.sourceConversationId && (
+                      {can("whatsapp.read") && request.sourceConversationId && (
                         <Link
                           to="/inbox"
                           search={{ conversationId: request.sourceConversationId }}
@@ -518,13 +533,13 @@ function RequestDetailPage() {
                           Open client inbox
                         </Link>
                       )}
-                      <Link to="/clients/$clientId" params={{ clientId: String(request.clientId) }} className="block border border-[#9aa29a] bg-white px-[10px] py-[7px] text-[11.5px] text-[#2c332d] hover:bg-[#f0f2ed]">View client profile</Link>
+                      {can("clients.read") && <Link to="/clients/$clientId" params={{ clientId: String(request.clientId) }} className="block border border-[#9aa29a] bg-white px-[10px] py-[7px] text-[11.5px] text-[#2c332d] hover:bg-[#f0f2ed]">View client profile</Link>}
                     </div>
                   </div>
                 </aside>
               </div>
             </section>
-            <EntityRecordsPanel entity="request" id={requestId} />
+            <EntityRecordsPanel entity="request" id={requestId} accessible={mayManageRequest} />
           </>
         )}
       </main>

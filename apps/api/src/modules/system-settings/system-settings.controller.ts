@@ -1,7 +1,8 @@
 import { BadRequestException, Body, Controller, Get, Patch, Post, Req, UseGuards } from "@nestjs/common";
 import { z, ZodError } from "zod";
-import { AdminGuard } from "../auth/admin.guard";
 import { AuthGuard, type AuthenticatedRequest } from "../auth/auth.guard";
+import { AllowedPermissions } from "../auth/allowed-permissions.decorator";
+import { PermissionGuard } from "../auth/permission.guard";
 import { SystemSettingsService, type SystemSettings } from "./system-settings.service";
 
 const demoDataSchema = z.object({ demoDataEnabled: z.boolean() });
@@ -9,7 +10,8 @@ const testDataDeletionSchema = z.object({ testDataDeletionEnabled: z.boolean() }
 const resetTestDataSchema = z.object({ confirmation: z.literal("DELETE ALL TEST DATA") });
 
 @Controller("system-settings")
-@UseGuards(AuthGuard, AdminGuard)
+@UseGuards(AuthGuard, PermissionGuard)
+@AllowedPermissions("settings.manage")
 export class SystemSettingsController {
   constructor(private readonly systemSettingsService: SystemSettingsService) {}
 
@@ -47,6 +49,7 @@ export class SystemSettingsController {
   }
 
   @Post("test-data/reset")
+  @AllowedPermissions("test_data.delete")
   resetTestData(
     @Req() request: AuthenticatedRequest,
     @Body() body: unknown,

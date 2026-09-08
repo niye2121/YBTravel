@@ -153,6 +153,52 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Roles provide understandable templates while this table records only the
+-- per-employee differences. A false row explicitly revokes a role default and
+-- a true row explicitly grants a permission not supplied by the selected roles.
+CREATE TABLE IF NOT EXISTS user_permission_overrides (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  permission_code TEXT NOT NULL,
+  granted BOOLEAN NOT NULL,
+  changed_by INTEGER REFERENCES users(id),
+  changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, permission_code)
+);
+
+CREATE INDEX IF NOT EXISTS user_permission_overrides_changed_idx
+  ON user_permission_overrides (changed_at DESC);
+
+-- This marker makes the compatibility bootstrap run exactly once. Existing
+-- administrators receive the currently implemented permissions so applying
+-- the migration cannot lock the only administrator out of operational screens.
+CREATE TABLE IF NOT EXISTS application_migrations (
+  key TEXT PRIMARY KEY,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM application_migrations WHERE key = 'permission_overrides_v1'
+  ) THEN
+    INSERT INTO user_permission_overrides (user_id, permission_code, granted, changed_by)
+    SELECT u.id, permission_code, true, u.id
+    FROM users u
+    CROSS JOIN unnest(ARRAY[
+      'whatsapp.read','whatsapp.send','whatsapp.manage_accounts','whatsapp.create_groups',
+      'clients.read','clients.create','clients.update','travellers.read','travellers.create',
+      'travellers.link','onboarding.read','onboarding.manage','requests.read','requests.create',
+      'requests.update','requests.assign_self','requests.assign_any','fees.read','fees.calculate',
+      'templates.read','templates.use','records.read','records.write','notifications.read',
+      'users.manage','settings.manage','integrations.manage','audit.read','test_data.delete'
+    ]::text[]) AS permission_code
+    WHERE 'system_administrator' = ANY(u.roles)
+    ON CONFLICT (user_id, permission_code) DO NOTHING;
+
+    INSERT INTO application_migrations (key) VALUES ('permission_overrides_v1');
+  END IF;
+END $$;
+
 -- Shared audit foundation for meaningful mutations. Domain modules write
 -- actor, action, and before/after JSON here in the same transaction as the
 -- mutation so a successful change cannot exist without its history.
@@ -169,6 +215,15 @@ CREATE TABLE IF NOT EXISTS audit_events (
 
 CREATE INDEX IF NOT EXISTS audit_events_entity_idx
   ON audit_events (entity_type, entity_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS audit_events_created_at_idx
+  ON audit_events (created_at DESC);
+
+CREATE INDEX IF NOT EXISTS audit_events_actor_created_idx
+  ON audit_events (actor_user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS audit_events_action_created_idx
+  ON audit_events (action, created_at DESC);
 
 -- Persistent login throttling survives API restarts and works across replicas.
 -- Only keyed hashes are stored; raw submitted emails and IP addresses are not.
@@ -198,6 +253,12 @@ CREATE TABLE IF NOT EXISTS sensitive_access_events (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE INDEX IF NOT EXISTS sensitive_access_events_created_at_idx
+  ON sensitive_access_events (created_at DESC);
+
+CREATE INDEX IF NOT EXISTS sensitive_access_events_actor_created_idx
+  ON sensitive_access_events (actor_user_id, created_at DESC);
+
 CREATE INDEX IF NOT EXISTS sensitive_access_events_resource_idx
   ON sensitive_access_events (resource_type, resource_id, created_at DESC);
 
@@ -222,6 +283,10 @@ CREATE TABLE IF NOT EXISTS staff_notifications (
 
 CREATE INDEX IF NOT EXISTS staff_notifications_user_created_idx
   ON staff_notifications (user_id, created_at DESC, id DESC);
+
+ALTER TABLE staff_notifications ADD COLUMN IF NOT EXISTS source_message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE;
+CREATE UNIQUE INDEX IF NOT EXISTS staff_notifications_user_message_uq
+  ON staff_notifications (user_id, source_message_id) WHERE source_message_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS staff_notifications_user_unread_idx
   ON staff_notifications (user_id, created_at DESC, id DESC)
@@ -736,8 +801,8 @@ CREATE TABLE IF NOT EXISTS assignment_settings (
     CHECK (assignment_mode IN ('recommend_only', 'automatic')),
   team_strategy TEXT NOT NULL DEFAULT 'lowest_workload'
     CHECK (team_strategy IN ('lowest_workload', 'round_robin')),
-  eligible_roles TEXT[] NOT NULL DEFAULT ARRAY['travel_agent', 'offshore_intake_employee']::text[],
-  escalation_roles TEXT[] NOT NULL DEFAULT ARRAY['system_administrator']::text[],
+  eligible_roles TEXT[] NOT NULL DEFAULT ARRAY['travel_agent', 'supervisor_manager', 'offshore_intake_employee']::text[],
+  escalation_roles TEXT[] NOT NULL DEFAULT ARRAY['supervisor_manager']::text[],
   continuity_enabled BOOLEAN NOT NULL DEFAULT true,
   working_hours_enabled BOOLEAN NOT NULL DEFAULT true,
   updated_by INTEGER REFERENCES users(id),
@@ -745,6 +810,14 @@ CREATE TABLE IF NOT EXISTS assignment_settings (
 );
 
 INSERT INTO assignment_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- Promote only the earlier untouched defaults. A business-customized role
+-- list remains authoritative and is never overwritten by this migration.
+UPDATE assignment_settings
+SET eligible_roles = ARRAY['travel_agent', 'supervisor_manager', 'offshore_intake_employee']::text[],
+    escalation_roles = ARRAY['supervisor_manager']::text[]
+WHERE eligible_roles = ARRAY['travel_agent', 'offshore_intake_employee']::text[]
+  AND escalation_roles = ARRAY['system_administrator']::text[];
 
 CREATE TABLE IF NOT EXISTS assignment_urgency_policies (
   urgency_level_id INTEGER PRIMARY KEY REFERENCES urgency_levels(id) ON DELETE CASCADE,
@@ -806,6 +879,72 @@ CREATE TABLE IF NOT EXISTS request_assignment_events (
 CREATE INDEX IF NOT EXISTS request_assignment_events_request_idx
   ON request_assignment_events (request_id, created_at DESC, id DESC);
 
+-- Supervisor review is retrospective and never blocks operational work. Each
+-- item names the completed action, the rule or default bypassed, its owner,
+-- timestamp and current review status. Source keys make automatic capture
+-- idempotent while manual exceptions remain append-only records.
+CREATE TABLE IF NOT EXISTS supervisor_review_items (
+  id BIGSERIAL PRIMARY KEY,
+  travel_request_id INTEGER REFERENCES travel_requests(id) ON DELETE SET NULL,
+  review_type TEXT NOT NULL
+    CHECK (review_type IN ('pricing_override', 'markup_change', 'waiver', 'assignment_override', 'operational_exception')),
+  summary TEXT NOT NULL CHECK (length(trim(summary)) BETWEEN 1 AND 240),
+  overridden_rule TEXT NOT NULL CHECK (length(trim(overridden_rule)) BETWEEN 1 AND 500),
+  reason TEXT NOT NULL CHECK (length(trim(reason)) BETWEEN 1 AND 2000),
+  value_amount NUMERIC(14, 2) CHECK (value_amount IS NULL OR value_amount >= 0),
+  currency CHAR(3),
+  occurred_by INTEGER NOT NULL REFERENCES users(id),
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  status TEXT NOT NULL DEFAULT 'unreviewed' CHECK (status IN ('unreviewed', 'reviewed')),
+  reviewed_by INTEGER REFERENCES users(id),
+  reviewed_at TIMESTAMPTZ,
+  outcome TEXT CHECK (outcome IN ('approved', 'rejected', 'noted', 'coaching_required')),
+  review_comment TEXT,
+  source_type TEXT,
+  source_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK ((value_amount IS NULL AND currency IS NULL) OR (value_amount IS NOT NULL AND currency IS NOT NULL)),
+  CHECK ((status = 'unreviewed' AND reviewed_by IS NULL AND reviewed_at IS NULL AND outcome IS NULL)
+      OR (status = 'reviewed' AND reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL AND outcome IS NOT NULL))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS supervisor_review_items_source_uq
+  ON supervisor_review_items (source_type, source_id)
+  WHERE source_type IS NOT NULL AND source_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS supervisor_review_items_queue_idx
+  ON supervisor_review_items (status, occurred_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS supervisor_review_items_request_idx
+  ON supervisor_review_items (travel_request_id, occurred_at DESC, id DESC);
+
+-- Review decisions are immutable history. The item stores the current result
+-- for queue queries while this table preserves every reviewer action.
+CREATE TABLE IF NOT EXISTS supervisor_review_events (
+  id BIGSERIAL PRIMARY KEY,
+  review_item_id BIGINT NOT NULL REFERENCES supervisor_review_items(id) ON DELETE CASCADE,
+  reviewer_user_id INTEGER NOT NULL REFERENCES users(id),
+  outcome TEXT NOT NULL CHECK (outcome IN ('approved', 'rejected', 'noted', 'coaching_required')),
+  comment TEXT NOT NULL CHECK (length(trim(comment)) BETWEEN 1 AND 2000),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS supervisor_review_events_item_idx
+  ON supervisor_review_events (review_item_id, created_at DESC, id DESC);
+
+-- Thresholds decide which completed markup changes need retrospective review;
+-- they never gate, pause or reject the operational action itself.
+CREATE TABLE IF NOT EXISTS supervisor_review_settings (
+  id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  markup_amount_threshold NUMERIC(14, 2) NOT NULL DEFAULT 100.00 CHECK (markup_amount_threshold >= 0),
+  markup_percentage_threshold NUMERIC(6, 2) NOT NULL DEFAULT 10.00 CHECK (markup_percentage_threshold BETWEEN 0 AND 1000),
+  currency CHAR(3) NOT NULL DEFAULT 'USD',
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+INSERT INTO supervisor_review_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
 UPDATE travel_requests
 SET request_type_id = (SELECT id FROM request_types WHERE code = 'new_flight_booking')
 WHERE request_type_id IS NULL;
@@ -865,6 +1004,50 @@ CREATE TABLE IF NOT EXISTS ai_draft_intakes (
 
 CREATE INDEX IF NOT EXISTS ai_draft_intakes_conversation_idx
   ON ai_draft_intakes (conversation_id, created_at DESC);
+
+-- Booking-context resolution keeps each conversational answer attached to one
+-- open trip. The operational record is still a travel request in Phase 1; the
+-- later Sabre booking/PNR module will hang from that request without changing
+-- this conversation history.
+ALTER TABLE travel_requests ADD COLUMN IF NOT EXISTS resolved_departure_date DATE;
+ALTER TABLE travel_requests ADD COLUMN IF NOT EXISTS departure_date_precision TEXT
+  CHECK (departure_date_precision IN ('day', 'month'));
+ALTER TABLE travel_requests ADD COLUMN IF NOT EXISTS resolved_return_date DATE;
+ALTER TABLE travel_requests ADD COLUMN IF NOT EXISTS return_date_precision TEXT
+  CHECK (return_date_precision IN ('day', 'month'));
+ALTER TABLE travel_requests ADD COLUMN IF NOT EXISTS booking_context_closed_at TIMESTAMPTZ;
+ALTER TABLE travel_requests ADD COLUMN IF NOT EXISTS booking_context_close_reason TEXT;
+
+CREATE INDEX IF NOT EXISTS travel_requests_open_booking_context_idx
+  ON travel_requests (client_id, created_at DESC)
+  WHERE booking_context_closed_at IS NULL;
+
+ALTER TABLE ai_draft_intakes ADD COLUMN IF NOT EXISTS booking_resolution TEXT
+  CHECK (booking_resolution IN ('matched', 'new_booking', 'ambiguous'));
+ALTER TABLE ai_draft_intakes ADD COLUMN IF NOT EXISTS matched_travel_request_id INTEGER
+  REFERENCES travel_requests(id);
+ALTER TABLE ai_draft_intakes ADD COLUMN IF NOT EXISTS booking_match_confidence SMALLINT
+  CHECK (booking_match_confidence BETWEEN 0 AND 100);
+ALTER TABLE ai_draft_intakes ADD COLUMN IF NOT EXISTS booking_match_reason TEXT;
+ALTER TABLE ai_draft_intakes ADD COLUMN IF NOT EXISTS resolved_departure_date DATE;
+ALTER TABLE ai_draft_intakes ADD COLUMN IF NOT EXISTS departure_date_precision TEXT
+  CHECK (departure_date_precision IN ('day', 'month'));
+ALTER TABLE ai_draft_intakes ADD COLUMN IF NOT EXISTS resolved_return_date DATE;
+ALTER TABLE ai_draft_intakes ADD COLUMN IF NOT EXISTS return_date_precision TEXT
+  CHECK (return_date_precision IN ('day', 'month'));
+ALTER TABLE ai_draft_intakes ADD COLUMN IF NOT EXISTS date_inference_note TEXT;
+
+-- More than one conversational answer can belong to the same booking. Earlier
+-- Phase 1 builds allowed only the creating draft to point at a request, so the
+-- obsolete unique constraint must become a normal history index.
+ALTER TABLE ai_draft_intakes DROP CONSTRAINT IF EXISTS ai_draft_intakes_travel_request_id_key;
+CREATE INDEX IF NOT EXISTS ai_draft_intakes_travel_request_idx
+  ON ai_draft_intakes (travel_request_id, created_at DESC)
+  WHERE travel_request_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS ai_draft_intakes_matched_booking_idx
+  ON ai_draft_intakes (matched_travel_request_id, created_at DESC)
+  WHERE matched_travel_request_id IS NOT NULL;
 
 ALTER TABLE travel_requests
   ADD COLUMN IF NOT EXISTS source_draft_intake_id INTEGER UNIQUE
@@ -978,6 +1161,11 @@ CREATE TABLE IF NOT EXISTS entity_documents (
 CREATE INDEX IF NOT EXISTS entity_documents_client_idx ON entity_documents (client_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS entity_documents_request_idx ON entity_documents (travel_request_id, created_at DESC, id DESC);
 
+-- Recoverable removal: hide attachments from operational access while keeping
+-- their original bytes and audit evidence for authorized recovery.
+ALTER TABLE entity_documents ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE entity_documents ADD COLUMN IF NOT EXISTS deleted_by INTEGER REFERENCES users(id);
+
 -- Evidence that a particular current field value was reviewed. The value
 -- fingerprint makes review evidence self-invalidating: when staff later edit
 -- the underlying value, the old review no longer satisfies onboarding.
@@ -1024,6 +1212,85 @@ CREATE TABLE IF NOT EXISTS onboarding_tasks (
 
 CREATE INDEX IF NOT EXISTS onboarding_tasks_client_status_idx
   ON onboarding_tasks (client_id, status, due_at, id);
+
+-- Durable Phase 1 reminders. A reminder is the long-lived operational record;
+-- delivery attempts are separate so a worker can retry an in-app notification
+-- without duplicating the reminder or losing its acknowledgement history.
+CREATE TABLE IF NOT EXISTS staff_reminders (
+  id BIGSERIAL PRIMARY KEY,
+  reminder_type TEXT NOT NULL CHECK (reminder_type IN (
+    'unanswered_inquiry', 'missing_information', 'next_action', 'onboarding_task'
+  )),
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  entity_type TEXT NOT NULL CHECK (entity_type IN ('travel_request', 'client', 'onboarding_task')),
+  entity_id TEXT NOT NULL,
+  request_id INTEGER REFERENCES travel_requests(id) ON DELETE CASCADE,
+  client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+  onboarding_task_id BIGINT REFERENCES onboarding_tasks(id) ON DELETE CASCADE,
+  assigned_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN (
+    'pending', 'due', 'overdue', 'escalated', 'acknowledged', 'resolved'
+  )),
+  due_at TIMESTAMPTZ NOT NULL,
+  escalates_at TIMESTAMPTZ NOT NULL,
+  acknowledged_at TIMESTAMPTZ,
+  acknowledged_by INTEGER REFERENCES users(id),
+  resolved_at TIMESTAMPTZ,
+  last_notified_state TEXT CHECK (last_notified_state IS NULL OR last_notified_state IN ('due', 'overdue', 'escalated')),
+  dedupe_key TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (escalates_at >= due_at)
+);
+
+CREATE INDEX IF NOT EXISTS staff_reminders_assignee_state_due_idx
+  ON staff_reminders (assigned_user_id, state, due_at, id);
+
+CREATE INDEX IF NOT EXISTS staff_reminders_active_due_idx
+  ON staff_reminders (state, due_at, escalates_at, id)
+  WHERE state NOT IN ('acknowledged', 'resolved');
+
+CREATE TABLE IF NOT EXISTS staff_reminder_deliveries (
+  id BIGSERIAL PRIMARY KEY,
+  reminder_id BIGINT NOT NULL REFERENCES staff_reminders(id) ON DELETE CASCADE,
+  reminder_state TEXT NOT NULL CHECK (reminder_state IN ('due', 'overdue', 'escalated')),
+  delivery_state TEXT NOT NULL DEFAULT 'pending' CHECK (delivery_state IN (
+    'pending', 'processing', 'delivered', 'failed', 'cancelled'
+  )),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  locked_at TIMESTAMPTZ,
+  delivered_at TIMESTAMPTZ,
+  last_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (reminder_id, reminder_state)
+);
+
+CREATE INDEX IF NOT EXISTS staff_reminder_deliveries_retry_idx
+  ON staff_reminder_deliveries (delivery_state, next_attempt_at, id)
+  WHERE delivery_state IN ('pending', 'processing', 'failed');
+
+ALTER TABLE staff_notifications
+  ADD COLUMN IF NOT EXISTS reminder_delivery_id BIGINT REFERENCES staff_reminder_deliveries(id) ON DELETE SET NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS staff_notifications_reminder_delivery_uq
+  ON staff_notifications (reminder_delivery_id)
+  WHERE reminder_delivery_id IS NOT NULL;
+
+-- Assignment alerts and reminder alerts share the existing notification bell.
+-- Drop the original narrow checks idempotently before expanding the vocabulary.
+ALTER TABLE staff_notifications DROP CONSTRAINT IF EXISTS staff_notifications_notification_type_check;
+ALTER TABLE staff_notifications
+  ADD CONSTRAINT staff_notifications_notification_type_check CHECK (
+    notification_type IN ('request_assigned', 'reminder_due', 'reminder_overdue', 'reminder_escalated', 'whatsapp_message')
+  );
+ALTER TABLE staff_notifications DROP CONSTRAINT IF EXISTS staff_notifications_entity_type_check;
+ALTER TABLE staff_notifications
+  ADD CONSTRAINT staff_notifications_entity_type_check CHECK (
+    entity_type IN ('travel_request', 'client', 'onboarding_task', 'reminder', 'conversation')
+  );
 
 ALTER TABLE traveller_accounts
   DROP CONSTRAINT IF EXISTS traveller_accounts_relationship_check;

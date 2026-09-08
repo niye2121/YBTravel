@@ -10,11 +10,11 @@ import {
   type OpenAiModel,
 } from "../lib/api";
 import { NAV_TABS } from "../lib/navTabs";
-import { getStoredUser, hasAdminRole } from "../lib/session";
+import { getStoredUser, hasPermission } from "../lib/session";
 
 export const Route = createFileRoute("/ai-provider-settings")({
   beforeLoad: () => {
-    if (!hasAdminRole(getStoredUser())) throw redirect({ to: "/" });
+    if (!hasPermission(getStoredUser(), "integrations.manage")) throw redirect({ to: "/" });
   },
   component: AiProviderSettingsPage,
 });
@@ -142,7 +142,7 @@ function AiProviderSettingsPage() {
         </div>
         <div>
           <div className="text-[10.5px] font-bold tracking-[1.4px] text-yb-muted4">SETUP · INTEGRATIONS</div>
-          <h1 className="mt-[1px] text-[26px] font-black">AI Provider</h1>
+          <h1 className="mt-[1px] yb-page-title">AI Provider</h1>
           <p className="mt-[3px] text-[13px] text-yb-muted3">
             Connect OpenAI for intake classification, structured extraction, and staff-reviewed response drafts.
           </p>
@@ -155,7 +155,7 @@ function AiProviderSettingsPage() {
         </div>
       )}
 
-      <form onSubmit={submit} className="mx-[22px] mb-[26px] grid grid-cols-[minmax(0,1fr)_340px] border border-yb-line bg-white">
+      <form onSubmit={submit} className="yb-card mx-[22px] mb-[26px] grid grid-cols-[minmax(0,1fr)_340px] border border-yb-line bg-white">
         <div className="min-w-0">
           <div className="flex items-center border-b border-yb-line bg-yb-panel-head px-[14px] py-[9px]">
             <div className="text-[11.5px] font-bold tracking-[1.1px] text-yb-panel-head-text">OPENAI CONNECTION</div>
@@ -325,7 +325,7 @@ function AiUsagePanel() {
   const summary = report?.summary;
 
   return (
-    <section className="mx-[22px] mb-[28px] border border-yb-line bg-white">
+    <section className="yb-card mx-[22px] mb-[28px] border border-yb-line bg-white">
       <div className="flex items-center border-b border-yb-line bg-yb-panel-head px-[14px] py-[9px]">
         <div>
           <div className="text-[11.5px] font-bold tracking-[1.1px] text-yb-panel-head-text">AI USAGE & COST HISTORY</div>

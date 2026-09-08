@@ -1,8 +1,34 @@
 # YB Travel — Design System
 
+## Current baseline — 8 September 2026
+
+The user selected the Inbox design as the system-wide baseline. This section
+supersedes the historical Requests Queue specification below.
+
+- Instrument Sans everywhere, including settings, forms and profiles. IBM Plex
+  Mono is reserved for identifiers and small technical labels.
+- Page titles: 24px, weight 600, line-height 1.3, letter-spacing -0.02em.
+- Shared `AppHeader` on every application route. Clicking the right-side avatar
+  or name opens `ProfileMenu`, which contains the single Sign Out action.
+- Secondary navigation: 44px, 13.5px text, green active underline. Inbox and
+  Managed Groups must use the same `WhatsAppSubnav`, not duplicate markup.
+- Canvas #f6f5f1, brand #0d2f24, text #1b1e1c, white panels, warm borders
+  #e6e3da, row separators #eeece5. Preserve semantic warning/error colors.
+- Controls: 9px radius; shared action buttons 36px tall, 13px text. Panels:
+  14px radius. Dense data tables may retain their compact row height.
+- Respect browser zoom uniformly. Do not add page-specific zoom compensation,
+  Lato or Helvetica overrides, or a second header implementation.
+- Keep each workflow's layout and permissions intact; consistent design does
+  not mean changing tables into chat layouts or changing operational behavior.
+
+Implementation source: `apps/web/src/styles/tokens.css` and shared AppShell
+components. The earlier specification is retained below for historical context.
+
+## Historical reference — August 2026 (superseded)
+
 **Source:** `Requests Queue (standalone).html` — the design approved by YB Travel
 **Extracted:** 7 August 2026
-**Status:** Authoritative. All screens follow these tokens.
+**Status:** Historical; superseded by the Inbox baseline above.
 
 This supersedes the earlier Tailwind approximation. The approved design uses precise values that do not map onto Tailwind's default palette, so screens are built with these tokens explicitly rather than with utility classes. When the real codebase is set up, these become Tailwind theme tokens in `tailwind.config`.
 
